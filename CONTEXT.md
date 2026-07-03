@@ -33,7 +33,7 @@ A concrete origin that can resolve and deliver one or more **Artifacts**. A sour
 _Avoid_: Catalog, channel
 
 **Source Type**:
-The explicit classification of a **Source** that determines how the CLI connects to it and resolves artifacts from it.
+The explicit classification of a **Source** that determines how the CLI connects to it and resolves artifacts from it. In v1, only `file` and `git` are supported source types for approval and resolution.
 _Avoid_: Inferred protocol, source guess
 
 **Source Descriptor**:
@@ -53,12 +53,16 @@ The canonical filename used by a **Source** to publish its **Source Descriptor**
 _Avoid_: Generic source manifest name, implicit location
 
 **Catalog**:
-An index that lists available **Artifacts**, the **Sources** that provide them, and the versions available for them. A catalog may be a JSON file or an API that can be queried for indexed sources and artifacts.
+An index that lists available **Artifacts**, the **Sources** that provide them, and the versions available for them. A catalog may be a JSON file or an API that can be queried for indexed sources and artifacts. When configured locally, each catalog is assigned a unique local name used in catalog-qualified install references.
 _Avoid_: Source, registry
 
 **Direct Install Reference**:
-The explicit installation reference a user can provide to install an **Artifact** directly from its **Source** without relying on any **Catalog**.
+The explicit typed source reference a user can provide to install an **Artifact** directly from its **Source** without relying on any **Catalog**. Its canonical form identifies the source as `{source-type}:{source-name}`; the artifact is selected separately, and any direct-install version pin applies to the **Source Version** rather than being embedded in the artifact selector. Ambiguity is evaluated only after normalization within the declared **Source Type**.
 _Avoid_: Catalog entry, inferred lookup
+
+**Catalog Install Reference**:
+The catalog-qualified install reference a user can provide when resolving through a configured **Catalog** instead of naming a typed **Source** directly. Its canonical form identifies the configured catalog name and the catalog-local source name as `{catalog-name}/{catalog-source-name}`, with an optional artifact selector provided separately. Without an artifact selector, it installs the resolved **Source** as a whole using the same semantics as a direct source install.
+_Avoid_: Direct source reference, implicit global lookup
 
 **Channel**:
 A higher-level distribution entry point that groups one or more **Catalogs** into a consumable feed, similar to a marketplace track.
@@ -105,7 +109,7 @@ A source-level installation mode where the installed set of artifacts is limited
 _Avoid_: Floating source, live source
 
 **Trust Policy**:
-The versioned security policy that controls which artifacts, artifact types, sources, or age constraints are allowed for a consumer repository. Local machine settings may harden this policy, but should not silently weaken it.
+The versioned security policy that controls which artifacts, artifact types, approved sources, or age constraints are allowed for a consumer repository. The manifest defines the allowlist of approved sources; approval of a source does not automatically approve every artifact type it can deliver. Source types that can prove publication time may also be constrained by a minimum age rule. Local machine settings may harden this policy, but should not silently weaken it.
 _Avoid_: Machine default, ad hoc flag
 
 **Minimum Age Rule**:
@@ -113,7 +117,7 @@ A trust constraint that rejects a resolved installation target unless its exact 
 _Avoid_: Source age, catalog age
 
 **Overwrite Policy**:
-The rule that determines what happens when installation would replace existing files in the target repository or folder. It may use manifest settings, command-line flags, and Git state to decide whether to prompt, skip, or overwrite.
+The rule that determines what happens when installation would replace existing files in the target repository or folder. By default, content already owned by the same **Managed Artifact** may be overwritten automatically when it still matches the prior **Materialization Record**; otherwise the policy may prompt, skip, or require an explicit override. Manifest settings, command-line flags, and Git state may refine that decision.
 _Avoid_: Merge strategy, sync mode
 
 **Sync**:
@@ -123,6 +127,14 @@ _Avoid_: Top-level command, apply-only command
 **Dry Run**:
 A non-mutating execution of reconciliation that resolves the intended changes and reports them without modifying the target repository or folder.
 _Avoid_: Apply, install
+
+**JSON Output Envelope**:
+The canonical machine-readable output shape for CLI commands when JSON output is requested. The initial envelope contains `code`, `message`, and `details`.
+_Avoid_: Ad hoc JSON, command-specific envelope
+
+**Exit Code**:
+The canonical process result code returned by the CLI to classify overall command outcome for shells, CI, and automation.
+_Avoid_: Message parsing, ad hoc status
 
 **CLI Command Name**:
 The canonical executable name used to invoke Talby Bootstrap from the command line. The initial command name is `tbboot`.
@@ -144,12 +156,48 @@ _Avoid_: Repository state, hidden temp cache
 The primary user-facing command for artifact management. The canonical command is `install`, with alias `i`; without arguments it runs **Sync**, and with artifact arguments it declares and applies them unless a declarative-only mode is requested.
 _Avoid_: sync command, add command
 
+**Operation Summary**:
+The default short human-readable output shown after a successful install or sync. It reports what sources or artifacts were reconciled, how many changes were applied, and the **Provenance Summary** for effective changes only.
+_Avoid_: Full verbose log, success-only silence
+
+**Operation Log**:
+The more verbose record of what happened during an install or sync, intended for follow-up inspection after the default short summary. The same operation may be rendered later at different verbosity levels without re-running the materialization itself.
+_Avoid_: Default output, transient debug spew
+
+**Verbosity Level**:
+The canonical named detail level used when rendering command output or replaying an **Operation Log**. V1 defines exactly three levels: `summary`, `normal`, and `verbose`, selected canonically with `--verbosity` and optionally via shorthand aliases such as `-v` and `-vv`.
+_Avoid_: Ad hoc per-command levels, numeric-only guess
+
+**Operation ID**:
+The stable identifier assigned to a recorded CLI operation so it can be listed and inspected later.
+_Avoid_: Ephemeral console line, implicit history position
+
+**Logs Command**:
+The lowercase `logs` command surface used to inspect recorded operations scoped to an **Operation Root**. Without additional arguments, it replays the most recent recorded operation for that root. Listing recorded operations is explicit via `logs ls` or `logs list`. Past operations may be inspected by **Operation ID** at a chosen verbosity level. When inspecting a recorded operation without an explicit verbosity override, it re-renders the log at the operation's original verbosity level. List output is sorted by descending date by default while allowing explicit sort flags.
+_Avoid_: Install-only subcommand, debug flag
+
+**Operation Retention Policy**:
+The rule that limits how many recorded operations and how much history the local operation log keeps in the **User Configuration Directory**.
+_Avoid_: Unlimited history, session-only guess
+
+**Operation Root**:
+The root path used to scope recorded operations for `logs`. If the current location belongs to a Git repository, the operation root is the repository root; otherwise it is the current local folder.
+_Avoid_: Session cwd only, global implicit scope
+
+**Operation Root Key**:
+The stable storage key derived from a normalized **Operation Root** to store recorded operations under the **User Configuration Directory**. The root path itself is preserved as readable metadata alongside the stored logs.
+_Avoid_: Raw long path, ad hoc folder name
+
+**Main Artifact**:
+The canonical artifact of a **Source** used as the shorthand install target when a user installs by bare name through configured **Catalogs**.
+_Avoid_: Default guess, arbitrary first artifact
+
 **Declare-Only Install**:
 An **Install Command** mode enabled by `--declare-only` that updates only the **Manifest** without materializing artifacts, updating the **Lockfile**, or touching cache state.
 _Avoid_: Partial install, preview install
 
 **Catalog Refresh**:
-The catalog maintenance operation that refreshes cached catalog metadata and indexes without changing the **Manifest**, **Lockfile**, or installed artifacts.
+The catalog maintenance operation that refreshes cached catalog metadata and indexes without changing the **Manifest**, **Lockfile**, or installed artifacts. Without explicit catalog arguments, it refreshes all configured catalogs.
 _Avoid_: Upgrade check, install refresh
 
 **Catalog Cache**:
@@ -157,7 +205,7 @@ The cached catalog metadata and indexes stored in the **User Configuration Direc
 _Avoid_: Installed artifacts, lockfile state
 
 **Catalog Add**:
-The catalog maintenance operation that registers a catalog in active configuration and performs an initial fetch so the catalog is usable immediately. If that initial fetch fails, the catalog is not registered.
+The catalog maintenance operation that registers a catalog in active configuration and performs an initial fetch so the catalog is usable immediately. Its canonical command shape is `catalog add <catalog-reference> --name <local-name>`, while omitting `--name` is allowed only when the catalog provides a non-conflicting default local name. If the chosen local name conflicts with an existing configured catalog, the add fails and reports the conflicting catalog so a different name can be chosen. If the initial fetch fails, the catalog is not registered.
 _Avoid_: Config-only add, deferred activation
 
 **Catalog Remove**:
@@ -165,11 +213,11 @@ The catalog maintenance operation that removes a catalog from active configurati
 _Avoid_: Soft disable, stale cache retention
 
 **Catalog List**:
-The catalog maintenance operation that shows configured catalogs together with minimal operational status such as cache presence, last successful refresh time, and whether the last refresh attempt failed.
+The catalog maintenance operation that shows configured catalogs together with minimal operational status. Its default output includes `local-name`, `catalog-reference`, `cache-status`, `last-refresh`, and `last-refresh-result`.
 _Avoid_: Config-only listing, verbose diagnostics dump
 
 **Search Command**:
-The top-level command that queries all configured catalog caches using **Artifact Name** and indexable **Artifact Descriptor** metadata such as description, type, tags, and source.
+The top-level command that queries all configured catalog caches and returns matching **Sources** as the primary result unit. Artifact information is shown as summary or expanded detail according to output flags, using **Artifact Name** and indexable **Artifact Descriptor** metadata such as description, type, and tags.
 _Avoid_: catalog admin command, full repository search
 
 **Managed Artifact**:
@@ -177,12 +225,24 @@ An **Artifact** whose installed state is tracked by the CLI as part of the repos
 _Avoid_: Untracked file, incidental content
 
 **Removal Policy**:
-The rule that determines how **Sync** handles a **Managed Artifact** that is no longer declared in the **Manifest**.
+The rule that determines how **Sync** handles a **Managed Artifact** that is no longer present in the final resolved desired state. Removal is decided per managed artifact after full resolution, not by the prior textual shape of the **Manifest** declaration.
 _Avoid_: Garbage collection, overwrite policy
 
 **Materialization Record**:
 The tracked record of what a **Managed Artifact** wrote into the target repository or folder.
 _Avoid_: Best-effort guess, inferred state
+
+**Provenance Summary**:
+The minimal user-visible identity shown for a managed change: artifact, source, source version, and whether the change owns a whole file or a fragment.
+_Avoid_: Opaque change, path-only report
+
+**Ownership Conflict**:
+The explicit conflict state where two **Managed Artifacts** would claim the same whole file or overlapping fragment region. Ownership is exclusive, so this conflict must be detected before writing.
+_Avoid_: Shared ownership, last-write-wins
+
+**Recovery State**:
+The explicit failure state recorded when a materialization operation stops after partial writes and the CLI cannot fully restore the prior state with certainty.
+_Avoid_: Silent partial failure, implicit dirty state
 
 **Fragment**:
 A bounded section inserted by an **Artifact** inside an existing file instead of creating or replacing the whole file.
@@ -194,6 +254,10 @@ _Avoid_: Fuzzy match, heuristic location
 
 **Fragment Drift**:
 The state where the content inside a managed **Fragment** no longer matches what the CLI previously materialized.
+_Avoid_: Expected update, normal sync
+
+**Whole-File Drift**:
+The state where a whole file owned by a **Managed Artifact** no longer matches the prior **Materialization Record**.
 _Avoid_: Expected update, normal sync
 
 ## Relationships
@@ -229,6 +293,7 @@ _Avoid_: Expected update, normal sync
 - A whole-**Source** install defaults to **Pinned Source** behavior
 - **Floating Source** behavior must be enabled explicitly
 - A **Manifest** defines the base **Trust Policy** for its consumer repository
+- A **Trust Policy** defines an explicit allowlist of approved **Sources**
 - A **Manifest** may define an **Overwrite Policy**
 - Local machine settings may harden the **Trust Policy** or require more confirmation
 - A **Manifest** expresses installation intent, not exact resolved versions
@@ -240,10 +305,30 @@ _Avoid_: Expected update, normal sync
 - A whole-**Source** resolution in the **Lockfile** includes the exact resolved **Artifacts** and their versions
 - An **Overwrite Policy** may inspect Git state before replacing files
 - The **Artifact Management Surface** is centered on the **Install Command**
+- A bare `install <name>` resolves against configured **Catalogs** by matching the **Main Artifact**
+- A bare `install <name>` may proceed only when the matching catalog entries resolve to one unique source identity, or all hits collapse to the same source and source version
+- A command may render results through the **JSON Output Envelope** when machine-readable output is requested
+- An **Exit Code** classifies command outcome as success, operational error, user-action conflict, or trust/policy denial
+- A successful install or sync shows an **Operation Summary** by default
+- A successful install or sync may be inspected later through an **Operation Log**
+- A **Verbosity Level** controls how much detail a command or replayed operation shows
+- A recorded operation has one **Operation ID**
+- An **Operation Root** scopes recorded operations for `logs`
+- An **Operation Root Key** stores recorded operations for a normalized **Operation Root**
+- `logs` without additional arguments replays the most recent recorded operation for the current **Operation Root**
+- `logs ls` and `logs list` explicitly list recorded operations with their command type, date, and verbosity level
+- The **Logs Command** may re-render a recorded **Operation Log** for an **Operation ID** at a requested verbosity level
+- The **Logs Command** uses the operation's original verbosity level by default when inspecting a recorded **Operation ID**
+- The **Logs Command** lists operations in descending date order by default, with flags to choose a different sort order
+- The **Operation Retention Policy** keeps at most 100 recorded operations and no more than one week of history by default
 - The **Catalog Management Surface** contains catalog configuration and **Catalog Refresh**
 - The **User Configuration Directory** stores **Catalog Cache** and other user-scoped configuration
 - The **User Configuration Directory** contains a `catalogs` subdirectory for **Catalog Cache**
 - The **Install Command** without arguments runs **Sync**
+- The **Install Command** may use a **Direct Install Reference** without any configured **Catalog**
+- The **Install Command** may use a **Catalog Install Reference** when resolving through a configured **Catalog**
+- The **Search Command** returns **Sources** as the primary result unit
+- A configured **Catalog** has one unique local name used for catalog-qualified install references
 - The **Install Command** with artifact arguments declares and applies those **Artifacts** by default
 - The **Install Command** may also accept a **Direct Install Reference** without any configured **Catalog**
 - **Declare-Only Install** updates only the **Manifest**
@@ -258,11 +343,17 @@ _Avoid_: Expected update, normal sync
 - A **Managed Artifact** is eligible for drift detection and controlled removal by **Sync**
 - A **Materialization Record** belongs to a **Managed Artifact**
 - A **Materialization Record** tracks whole files and any inserted **Fragments**
+- A managed change is reported to the user with a **Provenance Summary**
+- An **Ownership Conflict** exists when two **Managed Artifacts** would claim the same whole file or overlapping fragment region
+- A failed materialization may enter **Recovery State** when verified rollback is incomplete
 - A **Fragment** is delimited by exactly two **Fragment Boundaries**
 - Visible **Fragment Boundaries** are the default mechanism for managed fragment insertion
 - **Fragment Drift** is detected by comparing the current fragment contents against the prior **Materialization Record**
+- **Whole-File Drift** is detected by comparing the current whole-file contents against the prior **Materialization Record**
 - The default reaction to **Fragment Drift** is to prompt before updating or removing the fragment
+- The default reaction to **Whole-File Drift** is to prompt before updating or removing the whole file
 - The default **Removal Policy** is to prompt before removing a **Managed Artifact** no longer declared in the **Manifest**
+- A whole file already owned by the same **Managed Artifact** may be overwritten automatically when it still matches the prior **Materialization Record**
 
 ## Example dialogue
 
@@ -339,6 +430,38 @@ _Avoid_: Expected update, normal sync
 - search freshness could be confused with online lookup — resolved: the **Search Command** uses local cache from all configured catalogs by default
 - catalogs could be mistaken for the source of truth — resolved: a **Catalog** is only an index; the real identity of an **Artifact** is its **Source + Artifact Name**
 - installation could appear to require catalogs — resolved: the **Install Command** may use a **Direct Install Reference** without any configured **Catalog**
+- direct install versioning could split authority between source and artifact selectors — resolved: a **Direct Install Reference** identifies a typed source, and direct-install version pinning applies to the **Source Version** only
+- typed direct references could still resolve inconsistently — resolved: source-name normalization and ambiguity checks happen within the declared **Source Type**, and the artifact selector must resolve exactly one **Artifact Name**
+- manifest declaration shape could accidentally control removal — resolved: **Removal Policy** evaluates the final resolved **Managed Artifacts**, so switching between artifact-level and source-level declarations does not remove artifacts that remain desired
+- new repositories could trust remote content too broadly by default — resolved: the **Manifest** starts with an explicit allowlist of approved **Sources**, and remote source types remain denied until approved
+- temporal trust rules could be scoped too loosely — resolved: a **Minimum Age Rule** may be required for source types that can prove publication time, such as Git tags or releases
+- source approval could implicitly allow dangerous artifact behavior — resolved: source trust and artifact-type trust are separate; risky artifact types require explicit allowlisting and first-install confirmation
+- safe managed upgrades could become noisy and interactive — resolved: whole-file content already owned by the same **Managed Artifact** is overwritten automatically when it has no drift against the prior **Materialization Record**
+- rollback guarantees could over-promise atomicity — resolved: v1 only guarantees verified best-effort rollback, and unrecoverable partial failure enters explicit **Recovery State**
+- related artifacts could create ambiguous file ownership — resolved: ownership is exclusive, and any whole-file or overlapping-fragment collision is an explicit **Ownership Conflict**
+- managed changes could be too opaque to audit — resolved: every managed change reports a **Provenance Summary** with artifact, source, source version, and ownership kind
+- source-type sprawl could outpace the trust model — resolved: v1 supports only `file` and `git` as approvable **Source Types**
+- direct and catalog-qualified installs could collapse into one ambiguous syntax — resolved: typed-source installs use **Direct Install Reference**, while catalog-qualified installs use **Catalog Install Reference**
+- catalog-qualified source installs could diverge semantically from direct source installs — resolved: a **Catalog** is only an index of sources, so `{catalog-name}/{catalog-source-name}` without an artifact selector installs the same whole **Source** a direct reference would resolve
+- bare install shorthand could become too magical — resolved: bare `install <name>` searches configured **Catalogs** for a matching **Main Artifact** source and proceeds only when the result collapses to one source identity and source version
+- CLI output could fragment across human and automation use cases — resolved: v1 uses one **JSON Output Envelope** with `code`, `message`, and `details` when JSON output is requested
+- error handling could become too granular or too vague for automation — resolved: v1 uses four **Exit Codes** only: `0` success, `1` operational or validation error, `2` user-action conflict, `3` trust or policy denial
+- whole-file drift could behave differently from fragment drift — resolved: whole-file managed content also prompts before update or removal when it no longer matches the prior **Materialization Record**
+- search results could fight the install mental model — resolved: **Search Command** returns **Sources** first, with artifact detail level controlled by output flags
+- catalog-qualified references could drift if local catalog names are unstable — resolved: each configured **Catalog** has a unique local name, and **Catalog Add** fails on local-name conflicts while reporting the conflicting catalog
+- default install output could be too noisy or too thin — resolved: success output defaults to a short **Operation Summary**, with deeper follow-up inspection available through an **Operation Log**
+- follow-up inspection could be tied too narrowly to install syntax — resolved: recorded operations are inspected through a separate **Logs Command** keyed by **Operation ID**, while commands may also choose verbosity at execution time
+- operation history could grow without bounds or disappear too quickly — resolved: the default **Operation Retention Policy** keeps at most 100 operations and no more than one week of history
+- operation history listing could feel arbitrary — resolved: **Logs Command** sorts by descending date by default, with explicit sort flags for other orders
+- follow-up inspection could lose the original user perspective — resolved: `logs <operation-id>` defaults to the operation's original verbosity level, with flags to re-render at a different level
+- logs scope could become ambiguous across repositories and folders — resolved: logs are scoped by **Operation Root**, using the Git repository root when present and the current folder otherwise
+- the default `logs` action could fight the likely user intent — resolved: bare `logs` replays the most recent operation, while listing history is explicit via `logs ls` or `logs list`
+- operation-log storage paths could become too long or brittle — resolved: each **Operation Root** is stored under a stable **Operation Root Key** derived from the normalized root path, while preserving the readable path as metadata
+- output detail could drift across commands — resolved: v1 uses exactly three **Verbosity Levels** named `summary`, `normal`, and `verbose`
+- verbosity selection could fragment across commands — resolved: commands use canonical `--verbosity <level>` with optional shorthand aliases like `-v` and `-vv`
+- catalog naming could stay too implicit at creation time — resolved: `catalog add <catalog-reference> --name <local-name>` is the canonical form, with default-name fallback only when non-conflicting
+- catalog status output could be too thin to operate safely — resolved: `catalog list` defaults to `local-name`, `catalog-reference`, `cache-status`, `last-refresh`, and `last-refresh-result`
+- catalog refresh scope could diverge from global search/install resolution — resolved: `catalog refresh` without arguments refreshes all configured catalogs
 
 ## Interview state
 
@@ -364,8 +487,24 @@ This section preserves the current specification interview state by explicit use
     - `--declare-only` updates only the **Manifest**
     - catalog commands include **Catalog Add**, **Catalog List**, **Catalog Refresh**, and **Catalog Remove**
     - **Search Command** is top-level
+    - **Direct Install Reference** uses typed-source syntax `{source-type}:{source-name}`
+    - catalog-qualified install syntax uses `{catalog-name}/{catalog-source-name}`
+    - catalog-qualified source installs and direct source installs share the same whole-source semantics
+    - bare `install <name>` resolves through configured catalogs by matching the **Main Artifact** and requires a unique collapsed source result
+    - **Search Command** returns sources as the primary result unit, with artifact detail controlled by flags
+    - each configured catalog has a unique local name, and conflicting local names make **Catalog Add** fail explicitly
+    - successful install and sync operations show a short **Operation Summary** by default, with deeper follow-up inspection via **Logs Command** and **Operation ID**
+    - recorded operation history is retained locally for at most 100 operations and one week
+    - **Logs Command** sorts operations by descending date by default, with flags for alternate ordering
+    - the canonical command name is lowercase `logs`, and inspecting an operation defaults to its original verbosity level
+    - logs are scoped by an **Operation Root**, and bare `logs` replays the most recent operation while `logs ls|list` lists history
+    - each operation root is stored under a stable **Operation Root Key** derived from the normalized root path, with readable path metadata preserved
+    - v1 defines exactly three verbosity levels: `summary`, `normal`, and `verbose`
+    - verbosity is selected canonically with `--verbosity`, with optional shorthand aliases such as `-v` and `-vv`
+    - `catalog add <catalog-reference> --name <local-name>` is the canonical add form, with default-name fallback only when non-conflicting
+    - `catalog list` default output is `local-name`, `catalog-reference`, `cache-status`, `last-refresh`, and `last-refresh-result`
+    - `catalog refresh` without arguments refreshes all configured catalogs
   - Still open:
-    - canonical syntax of **Direct Install Reference**
     - full command shapes, arguments, and output contracts
 
 - **modelo de resolución/versionado** — partially resolved
@@ -374,9 +513,9 @@ This section preserves the current specification interview state by explicit use
     - **Catalog** is only an index, not a source of truth
     - duplicate catalog hits are only ambiguous when they resolve to different **Sources**
     - direct installation without any catalog must be supported
+    - direct-install version pinning applies to **Source Version** only
+    - source-qualified direct installs normalize and check ambiguity only within the declared **Source Type**
   - Still open:
-    - canonical direct-reference syntax
-    - precedence and normalization rules for source-qualified installs
     - exact version selection/update semantics beyond current glossary terms
 
 - **reglas de sync/overwrite/remove** — partially resolved
@@ -385,29 +524,30 @@ This section preserves the current specification interview state by explicit use
     - **Overwrite Policy** exists and may inspect Git state
     - **Removal Policy** defaults to prompting before removing a **Managed Artifact**
     - **Catalog Remove** deletes associated **Catalog Cache**
+    - removal is decided per final resolved **Managed Artifact**, not by the prior manifest declaration shape
+    - whole-file content owned by the same **Managed Artifact** is overwritten automatically when it has no drift
   - Still open:
-    - exact overwrite decision matrix
     - rollback/recovery behavior on partial materialization failure
-    - remove semantics for artifacts vs sources declared in the **Manifest**
 
 - **trust policy y defaults de seguridad** — still open
   - Resolved:
     - base **Trust Policy** lives in the versioned **Manifest**
     - **Minimum Age Rule** is evaluated against the exact **Resolution**
-  - Still open:
-    - default trust posture for new repos
-    - source-type allow/deny defaults
-    - confirmation rules for risky artifact types or unsigned/untrusted sources
+    - new repos start with an explicit allowlist of approved sources in the **Manifest**
+    - remote source types are denied until explicitly approved
+    - source types that support publication-time checks may be gated by a minimum age rule
+    - source approval does not automatically approve risky artifact types
+    - risky artifact types require explicit allowlisting and first-install confirmation
+    - only `file` and `git` are supported approvable source types in v1
 
 - **ownership/provenance de archivos y fragments** — partially resolved
   - Resolved:
     - **Materialization Record** tracks what a **Managed Artifact** wrote
     - **Fragment Boundary** is visible by default
     - **Fragment Drift** is detected and prompts before update or removal
+    - ownership is exclusive, and overlapping whole-file or fragment claims fail as **Ownership Conflict**
+    - managed changes report artifact, source, source version, and ownership kind as minimal provenance
   - Still open:
-    - provenance display/reporting to users
-    - ownership behavior when multiple artifacts target related files
-    - exact conflict rules for overlapping or nested fragments
 
 - **manejo de errores, drift y rollback** — partially resolved
   - Resolved:
@@ -415,16 +555,18 @@ This section preserves the current specification interview state by explicit use
     - stale catalog cache warns and continues by default
     - `--refresh` forces catalog refresh before install when desired
     - **Catalog Add** is atomic on initial fetch
-  - Still open:
-    - non-zero exit code taxonomy
-    - rollback guarantees for failed installs after partial writes
-    - machine-readable warning/error reporting
-    - drift handling for non-fragment whole-file mutations
+    - rollback is best-effort only when prior state can be restored and verified from pre-write backups
+    - unrecoverable partial failure enters explicit **Recovery State**
+    - machine-readable command output uses one **JSON Output Envelope** with `code`, `message`, and `details`
+    - v1 exit codes are `0` success, `1` operational or validation error, `2` user-action conflict, and `3` trust or policy denial
+    - whole-file drift prompts before update or removal
 
 ### Immediate open questions
 
-- canonical syntax for **Direct Install Reference**
-- ambiguity rules once direct source-qualified install syntax exists
-- concrete overwrite/remove matrix
-- trust-policy defaults for v1
-- rollback model after partial write failure
+- full command shapes and output contracts
+
+### Deferred future topics
+
+- interactive terminal mode for browsing catalogs, searching sources, and inspecting logs without composing full commands
+
+- source-type allow/deny defaults
