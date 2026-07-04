@@ -12,12 +12,8 @@ _Avoid_: Pattern, snippet, module
 The identifier used to refer to an **Artifact** within its own **Source**. An artifact name is only required to be unique inside that source.
 _Avoid_: Global ID, path
 
-**Artifact Type**:
-A category of **Artifact** that defines how it is interpreted and installed. Some artifact types are safe by default, while others require explicit enablement before installation.
-_Avoid_: Kind, format
-
 **Artifact Descriptor**:
-The explicit manifest published for an **Artifact** that declares its version and descriptive metadata without requiring the CLI to inspect the artifact contents.
+The explicit manifest published for an **Artifact** that declares its version, descriptive metadata, and materialization steps without requiring the CLI to infer artifact behavior from file contents.
 _Avoid_: Inline metadata, inferred manifest
 
 **Artifact Descriptor Filename**:
@@ -45,7 +41,7 @@ The explicit schema version declared by a **Source Descriptor** so the CLI can p
 _Avoid_: Implicit format version, source type version
 
 **Source Version**:
-The version or snapshot identifier that represents a published state of a **Source** as a whole. When direct install omits an explicit source version, resolution defaults to the latest stable published source version; if the source type cannot provide a stable published version concept, the install must fail until a source version is specified explicitly. Once resolved, later sync operations keep that resolved source version until the user explicitly asks to move to a newer one.
+The version or snapshot identifier that represents a resolved state of a **Source** as a whole. When direct install omits an explicit source version, `git` resolution defaults to the latest stable published source version, while `file` resolution records a local snapshot hash in the **Lockfile**. Once resolved, later sync operations keep that resolved source version until the user explicitly asks to move to a newer one.
 _Avoid_: Artifact version, floating state
 
 **Source Descriptor Filename**:
@@ -55,6 +51,10 @@ _Avoid_: Generic source manifest name, implicit location
 **Catalog**:
 An index that lists available **Artifacts**, the **Sources** that provide them, and the versions available for them. A catalog may be a JSON file or an API that can be queried for indexed sources and artifacts. When configured locally, each catalog is assigned a unique local name used in catalog-qualified install references.
 _Avoid_: Source, registry
+
+**Catalog Reference**:
+A resolvable location or identifier used to register a **Catalog** before it has a configured local name.
+_Avoid_: Local catalog name, catalog source
 
 **Direct Install Reference**:
 The explicit typed source reference a user can provide to install an **Artifact** directly from its **Source** without relying on any **Catalog**. Its canonical form identifies the source as `{source-type}:{source-name}`; the artifact is selected separately, and any direct-install version pin applies to the **Source Version** rather than being embedded in the artifact selector. Ambiguity is evaluated only after normalization within the declared **Source Type**.
@@ -109,7 +109,7 @@ A source-level installation mode where the installed set of artifacts is limited
 _Avoid_: Floating source, live source
 
 **Trust Policy**:
-The versioned security policy that controls which artifacts, artifact types, approved sources, or age constraints are allowed for a consumer repository. The manifest defines the allowlist of approved sources; approval of a source does not automatically approve every artifact type it can deliver. `file:` sources are allowed by default only when they point inside the current **Operation Root**; `git:` sources always require explicit approval in the manifest. Source types that can prove publication time may also be constrained by a minimum age rule. Local machine settings may harden this policy, but should not silently weaken it.
+The versioned security policy that controls which artifacts, materialization step types, approved sources, or age constraints are allowed for a consumer repository. The manifest defines the allowlist of approved sources; approval of a source does not automatically approve every risky step type it can deliver. `file:` sources are allowed by default only when they point inside the current **Operation Root**; `git:` sources always require explicit approval in the manifest. Source types that can prove publication time may also be constrained by a minimum age rule. Local machine settings may harden this policy, but should not silently weaken it.
 _Avoid_: Machine default, ad hoc flag
 
 **Minimum Age Rule**:
@@ -133,7 +133,7 @@ The canonical machine-readable output shape for CLI commands when JSON output is
 _Avoid_: Ad hoc JSON, command-specific envelope
 
 **Exit Code**:
-The canonical process result code returned by the CLI to classify overall command outcome for shells, CI, and automation.
+The canonical process result code returned by the CLI to classify overall command outcome for shells, CI, and automation. When a command would require an interactive prompt but is running non-interactively or with JSON output, it fails with exit code `2`.
 _Avoid_: Message parsing, ad hoc status
 
 **CLI Command Name**:
@@ -157,7 +157,7 @@ The primary user-facing command for artifact management. The canonical command i
 _Avoid_: sync command, add command
 
 **Upgrade Command**:
-The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With an explicit target, it reuses the same unambiguous target forms as `install`: typed source, catalog-qualified source, or shorthand only when uniquely resolved. Source targets upgrade the whole declared source; artifact targets upgrade only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. For multi-target upgrades it applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. By default it advances each eligible target to the latest stable published version allowed by the active trust policy. Versions skipped because of trust or age rules are reported in more verbose output, not in the default short summary. The canonical command name is `upgrade`; `install --upgrade` is an equivalent shortcut when the user wants install-style targeting with upgrade behavior.
+The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With one explicit target, it reuses the same unambiguous target forms as `install`: typed source, catalog-qualified source, or shorthand only when uniquely resolved. V1 does not accept multiple explicit upgrade targets in a single command. Source targets upgrade the whole declared source; artifact targets upgrade only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. Bare `upgrade` applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. By default it advances each eligible target to the latest stable published version allowed by the active trust policy. Versions skipped because of trust or age rules are reported in more verbose output, not in the default short summary. The canonical command name is `upgrade`; `install --upgrade` is an equivalent shortcut when the user wants install-style targeting with upgrade behavior.
 _Avoid_: Sync alias, catalog refresh
 
 **Operation Summary**:
@@ -221,12 +221,20 @@ The catalog maintenance operation that shows configured catalogs together with m
 _Avoid_: Config-only listing, verbose diagnostics dump
 
 **Search Command**:
-The top-level command that queries all configured catalog caches and returns matching **Sources** as the primary result unit. Artifact information is shown as summary or expanded detail according to output flags, using **Artifact Name** and indexable **Artifact Descriptor** metadata such as description, type, and tags. In non-interactive CLI use it requires an explicit query.
+The top-level command that queries all configured catalog caches and returns matching **Sources** as the primary result unit. Artifact information is shown as summary or expanded detail according to output flags, using **Artifact Name** and indexable **Artifact Descriptor** metadata such as description, tags, and materialization step types. In non-interactive CLI use it requires an explicit query.
 _Avoid_: catalog admin command, full repository search
 
 **Managed Artifact**:
 An **Artifact** whose installed state is tracked by the CLI as part of the repository's managed configuration.
 _Avoid_: Untracked file, incidental content
+
+**Materialization Step**:
+One declared action in an **Artifact Descriptor** that writes, updates, renders, or executes part of an artifact installation.
+_Avoid_: Artifact type, hidden install behavior
+
+**Materialization Step Type**:
+The category of a **Materialization Step** that defines how that step is interpreted. V1 step types are `file`, `fragment`, `template`, `script`, and `prompt`; `script` and `prompt` are risky step types requiring explicit allowlisting and first-install confirmation.
+_Avoid_: Artifact kind, source type
 
 **Removal Policy**:
 The rule that determines how **Sync** handles a **Managed Artifact** that is no longer present in the final resolved desired state. Removal is decided per managed artifact after full resolution, not by the prior textual shape of the **Manifest** declaration.
@@ -253,7 +261,7 @@ A bounded section inserted by an **Artifact** inside an existing file instead of
 _Avoid_: Whole file, anonymous patch
 
 **Fragment Boundary**:
-The explicit start and end markers that identify a **Fragment** so it can be updated or removed safely later. These markers are visible in the target file so generated sections are easy to audit and avoid manual edits.
+The explicit start and end markers that identify a **Fragment** so it can be updated or removed safely later. These markers are visible in the target file, include the artifact identity and fragment name, and use file-appropriate comment syntax.
 _Avoid_: Fuzzy match, heuristic location
 
 **Fragment Drift**:
@@ -268,11 +276,12 @@ _Avoid_: Expected update, normal sync
 
 - An **Artifact** comes from exactly one source location
 - An **Artifact** is materialized into a target repository or folder
-- An **Artifact** has exactly one **Artifact Type**
 - An **Artifact** publishes exactly one **Artifact Descriptor**
 - An **Artifact Descriptor** has exactly one canonical **Artifact Descriptor Filename**
 - An **Artifact Descriptor** lives in the root folder of its individual **Artifact**
-- An **Artifact Type** may require explicit enablement before its **Artifacts** can be installed
+- An **Artifact Descriptor** declares one or more **Materialization Steps**
+- A **Materialization Step** has exactly one **Materialization Step Type**
+- A **Materialization Step Type** may require explicit enablement before an artifact containing that step can be installed
 - A **Source** provides one or more **Artifacts**
 - A **Source** has exactly one **Source Type**
 - A **Source** publishes exactly one **Source Descriptor**
@@ -286,6 +295,7 @@ _Avoid_: Expected update, normal sync
 - The version of an **Artifact** is defined only in its **Artifact Descriptor**
 - An **Artifact** may be published as part of a specific **Source Version**
 - A **Catalog** references one or more **Sources** and the **Artifacts** they provide
+- A **Catalog Reference** identifies the catalog being registered by **Catalog Add**
 - A **Catalog** is an index for discovery, not the source of truth for an **Artifact**
 - A **Channel** groups one or more **Catalogs**
 - A **Manifest** belongs to one consumer repository
@@ -345,12 +355,14 @@ _Avoid_: Expected update, normal sync
 - **Dry Run** executes reconciliation without mutating files
 - The canonical **CLI Command Name** for this tool is `tbboot`
 - A **Managed Artifact** is eligible for drift detection and controlled removal by **Sync**
+- A **Managed Artifact** is materialized by applying its declared **Materialization Steps**
 - A **Materialization Record** belongs to a **Managed Artifact**
 - A **Materialization Record** tracks whole files and any inserted **Fragments**
 - A managed change is reported to the user with a **Provenance Summary**
 - An **Ownership Conflict** exists when two **Managed Artifacts** would claim the same whole file or overlapping fragment region
 - A failed materialization may enter **Recovery State** when verified rollback is incomplete
 - A **Fragment** is delimited by exactly two **Fragment Boundaries**
+- Each **Fragment Boundary** identifies its owning artifact and fragment name
 - Visible **Fragment Boundaries** are the default mechanism for managed fragment insertion
 - **Fragment Drift** is detected by comparing the current fragment contents against the prior **Materialization Record**
 - **Whole-File Drift** is detected by comparing the current whole-file contents against the prior **Materialization Record**
@@ -358,6 +370,26 @@ _Avoid_: Expected update, normal sync
 - The default reaction to **Whole-File Drift** is to prompt before updating or removing the whole file
 - The default **Removal Policy** is to prompt before removing a **Managed Artifact** no longer declared in the **Manifest**
 - A whole file already owned by the same **Managed Artifact** may be overwritten automatically when it still matches the prior **Materialization Record**
+
+## Canonical examples
+
+`tbboot install foo`
+: Resolves `foo` through configured **Catalogs** as a shorthand **Main Artifact** install. It proceeds only when matches collapse to one source identity and source version.
+
+`tbboot install foo --declare-only`
+: Records the resolved shorthand target in the **Manifest** without materializing artifacts, updating the **Lockfile**, or touching cache state.
+
+`tbboot install foo`
+: Fails as ambiguous when configured **Catalogs** contain `foo` matches that resolve to different source identities or source versions.
+
+`tbboot install file:./artifacts --artifact editorconfig`
+: May proceed without explicit source approval when `./artifacts` is inside the current **Operation Root** and its materialization step types are allowed by policy. If no source version is explicit, the **Lockfile** records a local snapshot hash.
+
+`tbboot install git:https://example.com/talby/artifacts.git --artifact editorconfig`
+: Fails with trust or policy denial until that exact **Source** is approved in the versioned **Manifest**.
+
+`tbboot install git:https://example.com/talby/artifacts.git --artifact bootstrap-script`
+: Still fails when the source is approved but the artifact contains a risky **Materialization Step Type**, such as `script` or `prompt`, that has not been explicitly allowlisted and confirmed for first install.
 
 ## Example dialogue
 
@@ -412,7 +444,7 @@ _Avoid_: Expected update, normal sync
 - managed state could be tracked too coarsely — resolved: store a **Materialization Record** for whole files and bounded **Fragments**
 - fragment removal could become heuristic and unsafe — resolved: default to visible **Fragment Boundaries** for managed fragments
 - manual edits inside managed fragments could be lost silently — resolved: detect **Fragment Drift** and prompt before update or removal
-- local cache could be premature complexity — resolved: exclude local cache/state from the initial specification until a real performance need is measured
+- local cache could conflate catalog indexes with source materialization — resolved: v1 includes **Catalog Cache** for catalog metadata and indexes, but excludes source and materialization caches until a real performance need is measured
 - manifest discovery could be ambiguous — resolved: the canonical **Manifest Filename** is `talby-artifacts.yaml`
 - lockfile discovery could be ambiguous — resolved: the canonical **Lockfile Filename** is `talby-artifacts.lock.yaml`
 - source descriptor discovery could be ambiguous — resolved: the canonical **Source Descriptor Filename** is `talby-source.yaml`
@@ -439,7 +471,7 @@ _Avoid_: Expected update, normal sync
 - manifest declaration shape could accidentally control removal — resolved: **Removal Policy** evaluates the final resolved **Managed Artifacts**, so switching between artifact-level and source-level declarations does not remove artifacts that remain desired
 - new repositories could trust remote content too broadly by default — resolved: the **Manifest** starts with an explicit allowlist of approved **Sources**, and remote source types remain denied until approved
 - temporal trust rules could be scoped too loosely — resolved: a **Minimum Age Rule** may be required for source types that can prove publication time, such as Git tags or releases
-- source approval could implicitly allow dangerous artifact behavior — resolved: source trust and artifact-type trust are separate; risky artifact types require explicit allowlisting and first-install confirmation
+- source approval could implicitly allow dangerous artifact behavior — resolved: source trust and materialization-step trust are separate; risky **Materialization Step Types** require explicit allowlisting and first-install confirmation
 - safe managed upgrades could become noisy and interactive — resolved: whole-file content already owned by the same **Managed Artifact** is overwritten automatically when it has no drift against the prior **Materialization Record**
 - rollback guarantees could over-promise atomicity — resolved: v1 only guarantees verified best-effort rollback, and unrecoverable partial failure enters explicit **Recovery State**
 - related artifacts could create ambiguous file ownership — resolved: ownership is exclusive, and any whole-file or overlapping-fragment collision is an explicit **Ownership Conflict**
@@ -472,7 +504,7 @@ _Avoid_: Expected update, normal sync
 - multi-target install could overcomplicate prompts, conflicts, and rollback — resolved: v1 allows only one explicit install target per command, while bare `install` remains the **Sync** entrypoint
 - install target parsing could become precedence-driven and surprising — resolved: ambiguous target syntax fails and requires an explicit unambiguous install form
 - supported source types could still have unsafe default trust rules — resolved: `file:` is allowed by default only inside the current **Operation Root**, while `git:` always requires explicit manifest approval
-- direct install defaults could undermine reproducibility — resolved: omitting `--source-version` selects the latest stable published **Source Version**, and fails when no stable published version concept exists
+- direct install defaults could undermine reproducibility — resolved: omitting `--source-version` selects the latest stable published **Source Version** for `git`, while `file` records a local snapshot hash in the **Lockfile**
 - unpinned source declarations could silently float on later syncs — resolved: default version selection is only for the first resolution, and later syncs keep the previously resolved **Source Version** until the user explicitly changes it
 - the underlying **Sync** operation could be mistaken for a top-level CLI command — resolved: users trigger reconciliation through bare `install`, while **Sync** remains the underlying operation name
 - upgrade behavior could get conflated with install or catalog refresh — resolved: advancing to a newer resolved version uses a dedicated `upgrade` command
@@ -556,7 +588,7 @@ This section preserves the current specification interview state by explicit use
       - `tbboot logs list`
     - default human-facing output uses one short stable shape, with extra detail available only through `--verbosity` or `logs`
   - Still open:
-    - shorthand `install <name>`
+    - none for v1
 
 - **modelo de resolución/versionado** — partially resolved
   - Resolved:
@@ -566,10 +598,11 @@ This section preserves the current specification interview state by explicit use
     - direct installation without any catalog must be supported
     - direct-install version pinning applies to **Source Version** only
     - source-qualified direct installs normalize and check ambiguity only within the declared **Source Type**
-    - omitting `--source-version` selects the latest stable published **Source Version**, or fails if the source type has no stable published version concept
+    - omitting `--source-version` selects the latest stable published **Source Version** for `git`, while `file` records a local snapshot hash in the **Lockfile**
     - later syncs keep the previously resolved **Source Version** until the user explicitly requests a newer one
     - moving to a newer resolved version uses a dedicated `upgrade` command
     - bare `upgrade` targets the entire manifest by default
+    - explicit `upgrade` accepts only one target in v1
     - `upgrade` advances to the latest stable published version allowed by policy by default
     - source targets upgrade a whole source, while artifact targets upgrade only the selected artifact
     - `upgrade` rejects targets that are not already declared in the **Manifest**
@@ -592,10 +625,10 @@ This section preserves the current specification interview state by explicit use
     - **Catalog Remove** deletes associated **Catalog Cache**
     - removal is decided per final resolved **Managed Artifact**, not by the prior manifest declaration shape
     - whole-file content owned by the same **Managed Artifact** is overwritten automatically when it has no drift
+    - rollback on partial materialization failure is verified best-effort only
   - Still open:
-    - rollback/recovery behavior on partial materialization failure
+    - none for v1
 
-- **trust policy y defaults de seguridad** — still open
 - **trust policy y defaults de seguridad** — resolved for v1 scope
   - Resolved:
     - base **Trust Policy** lives in the versioned **Manifest**
@@ -603,8 +636,10 @@ This section preserves the current specification interview state by explicit use
     - new repos start with an explicit allowlist of approved sources in the **Manifest**
     - remote source types are denied until explicitly approved
     - source types that support publication-time checks may be gated by a minimum age rule
-    - source approval does not automatically approve risky artifact types
-    - risky artifact types require explicit allowlisting and first-install confirmation
+    - source approval does not automatically approve risky materialization step types
+    - risky materialization step types require explicit allowlisting and first-install confirmation
+    - v1 materialization step types are `file`, `fragment`, `template`, `script`, and `prompt`
+    - `script` and `prompt` are risky materialization step types
     - only `file` and `git` are supported approvable source types in v1
     - `file:` is allowed by default only inside the current **Operation Root**
     - `git:` always requires explicit manifest approval
@@ -627,16 +662,16 @@ This section preserves the current specification interview state by explicit use
     - unrecoverable partial failure enters explicit **Recovery State**
     - machine-readable command output uses one **JSON Output Envelope** with `code`, `message`, and `details`
     - v1 exit codes are `0` success, `1` operational or validation error, `2` user-action conflict, and `3` trust or policy denial
+    - required prompts fail with exit code `2` in non-interactive execution or JSON output
     - whole-file drift prompts before update or removal
     - policy-blocked upgrade candidates do not change exit code `0` and are reported only in verbose output or logs
-    - multi-target `upgrade` stops at the first mutating failure after processing targets in deterministic order
+    - bare `upgrade` stops at the first mutating failure after processing targets in deterministic order
   - Still open:
-    - whether any additional rollback guarantees beyond verified best-effort are worth defining in v1
+    - none for v1
 
 ### Immediate open questions
 
-- shorthand `install <name>`
-- whether rollback semantics need any stronger guarantees than verified best-effort for v1
+- none for v1
 
 ### Session checkpoint
 

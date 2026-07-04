@@ -10,5 +10,8 @@
 # Built Visual Studio Code Extensions
 *.vsix
 
-# ATL
-.atl/
+# Local files
+.local-*
+
+# Temporary files
+.tmp-*
