@@ -157,11 +157,11 @@ The primary user-facing command for artifact management. The canonical command i
 _Avoid_: sync command, add command
 
 **Upgrade Command**:
-The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With an explicit target, it reuses the same unambiguous target forms as `install`: typed source, catalog-qualified source, or shorthand only when uniquely resolved. Source targets upgrade the whole declared source; artifact targets upgrade only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. For multi-target upgrades it applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. By default it advances each eligible target to the latest stable published version allowed by the active trust policy. Versions skipped because of trust or age rules are reported in more verbose output, not in the default short summary.
+The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With an explicit target, it reuses the same unambiguous target forms as `install`: typed source, catalog-qualified source, or shorthand only when uniquely resolved. Source targets upgrade the whole declared source; artifact targets upgrade only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. For multi-target upgrades it applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. By default it advances each eligible target to the latest stable published version allowed by the active trust policy. Versions skipped because of trust or age rules are reported in more verbose output, not in the default short summary. The canonical command name is `upgrade`; `install --upgrade` is an equivalent shortcut when the user wants install-style targeting with upgrade behavior.
 _Avoid_: Sync alias, catalog refresh
 
 **Operation Summary**:
-The default short human-readable output shown after a successful install or sync. It reports what sources or artifacts were reconciled, how many changes were applied, and the **Provenance Summary** for effective changes only.
+The default short human-readable output shown after a successful install or sync. It uses one stable, concise shape across human-facing commands: a one-line result followed by effective changes only when present. For materialization commands it reports what sources or artifacts were reconciled, how many changes were applied, and the **Provenance Summary** for effective changes only. Additional detail lives behind **Verbosity Level** selection or the **Logs Command**.
 _Avoid_: Full verbose log, success-only silence
 
 **Operation Log**:
@@ -541,8 +541,22 @@ This section preserves the current specification interview state by explicit use
     - bare `upgrade` attempts to advance the entire manifest
     - explicit `upgrade` targets reuse the same unambiguous forms as `install`
     - `upgrade` supports the same **Dry Run** contract as other reconciliation flows
+    - direct and catalog-qualified explicit installs use one canonical shape: `tbboot install <source-ref> [--artifact <artifact-name>] [--source-version <version>]`
+    - omitting `--artifact` installs the whole **Source**, while `--artifact` selects one **Artifact** inside that source
+    - explicit upgrades use one canonical shape: `tbboot upgrade <source-ref> [--artifact <artifact-name>]`
+    - omitting `--artifact` upgrades the declared whole **Source**, while `--artifact` narrows the explicit source target to one declared **Artifact**
+    - `upgrade` remains the canonical version-advancement command, and `install --upgrade` is a shortcut for the same upgrade behavior on the selected install target
+    - canonical v1 command shapes outside install and upgrade are:
+      - `tbboot search <query>`
+      - `tbboot catalog add <catalog-reference> [--name <local-name>]`
+      - `tbboot catalog list`
+      - `tbboot catalog refresh [<local-name>...]`
+      - `tbboot catalog remove <local-name>`
+      - `tbboot logs [<operation-id>]`
+      - `tbboot logs list`
+    - default human-facing output uses one short stable shape, with extra detail available only through `--verbosity` or `logs`
   - Still open:
-    - full command shapes, arguments, and output contracts
+    - shorthand `install <name>`
 
 - **modelo de resolución/versionado** — partially resolved
   - Resolved:
@@ -566,8 +580,9 @@ This section preserves the current specification interview state by explicit use
     - first successful `install` creates the **Lockfile** when only a **Manifest** exists
     - the **Manifest** stores enough source identity to re-resolve stably if the **Lockfile** is lost or regenerated
     - only stable source identity is normative in the **Manifest**; original user-facing references are optional metadata only
+    - v1 adds no extra version-selection controls beyond direct-install `--source-version` and default upgrade-to-latest-stable-allowed behavior
   - Still open:
-    - exact version selection/update semantics beyond current glossary terms
+    - none for v1
 
 - **reglas de sync/overwrite/remove** — partially resolved
   - Resolved:
@@ -620,9 +635,7 @@ This section preserves the current specification interview state by explicit use
 
 ### Immediate open questions
 
-- full command shapes and flag grammar for `install`, `upgrade`, `search`, `catalog *`, and `logs`
-- exact human-readable output contracts per command and verbosity level
-- whether version selection needs extra user-facing controls beyond the current default `upgrade` policy
+- shorthand `install <name>`
 - whether rollback semantics need any stronger guarantees than verified best-effort for v1
 
 ### Session checkpoint
