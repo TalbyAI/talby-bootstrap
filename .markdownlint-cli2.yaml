@@ -1,0 +1,17 @@
+globs:
+  - "**/*.md"
+
+ignores:
+  - "**/.agents/**"
+  - "**/.codex/**"
+
+gitignore: true
+noBanner: true
+noProgress: true
+
+config:
+  default: true
+  line-length: false
+  no-duplicate-heading:
+    siblings_only: true
+  no-emphasis-as-heading: false
