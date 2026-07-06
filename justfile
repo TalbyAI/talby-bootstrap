@@ -1,5 +1,3 @@
-set shell := ["pwsh.exe", "-NoProfile", "-c"]
-
 # Default task prints help message
 default: help
 

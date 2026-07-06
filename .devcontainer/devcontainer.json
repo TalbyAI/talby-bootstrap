@@ -1,16 +1,20 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/go .
+// README at: https://containers.dev/implementors/json_reference/ .
 {
-	"name": "Go",
+	"name": "Talby Base",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"build": {
 		"dockerfile": "Dockerfile",
 		"context": ".."
 	},
 	"features": {
+		"ghcr.io/devcontainers/features/go:1": {
+			"version": "1.26.4"
+		},
 		"ghcr.io/devcontainers/features/github-cli:1": {},
 		"ghcr.io/devcontainers-extra/features/ripgrep:1": {},
 		"ghcr.io/devcontainers/features/node:2": {},
+		"ghcr.io/devcontainers/features/powershell:2": {},
 		"ghcr.io/devcontainers/features/docker-in-docker:4": {
 			"moby": false
 		}
