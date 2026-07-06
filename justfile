@@ -19,6 +19,10 @@ fix-md:
 check-go:
     @go test ./...
 
+# Runs the CLI with optional arguments
+run *args:
+    @go run . {{args}}
+
 # Formats Go files
 fmt-go:
     @gofmt -w main.go cmd internal
