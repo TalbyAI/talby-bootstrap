@@ -36,7 +36,9 @@
 		"vscode": {
 			"extensions": [
 				"nefrob.vscode-just-syntax",
-				"golang.go"
+				"golang.go",
+				"yzhang.markdown-all-in-one",
+				"DavidAnson.vscode-markdownlint"
 			]
 		}
 	}
