@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Review Triage"
+  short_description: "Analyze, classify, and resolve PR reviews"
+  default_prompt: "Use $gh-review-triage to inspect a GitHub pull request, classify review comments, and prepare or apply the right fixes."
