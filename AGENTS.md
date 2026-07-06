@@ -4,7 +4,7 @@
 
 This repository is currently documentation-first for the Talby Bootstrap CLI design. Top-level files such as `CONTEXT.md`, `ARCHITECTURE.md`, `MISSION.md`, `NOTES.md`, `RESOURCES.md`, and `UBIQUITOUS_LANGUAGE.md` hold the core product language and decisions. Architecture decisions live in `docs/adr/` and design specs live in `docs/superpowers/specs/`. Learning artifacts are under `learning-records/`, rendered references under `reference/`, and lessons under `lessons/`.
 
-There is no application source tree or test suite yet. Do not invent one unless the change explicitly introduces implementation code.
+Go implementation code lives in `main.go`, `cmd/tbboot/`, and `internal/`. Keep Cobra-specific parsing in `cmd/tbboot/`; command-independent behavior belongs under `internal/`.
 
 ## Build, Test, and Development Commands
 
@@ -14,9 +14,12 @@ Use `just` for repository tasks:
 just
 just check-md
 just fix-md
+just check-go
+just fmt-go
+just check
 ```
 
-`just` prints available tasks. `just check-md` runs `pnpx markdownlint-cli2 .` across Markdown files. `just fix-md` applies markdownlint auto-fixes where possible. These commands require `just`, PowerShell, and `pnpx`/Node tooling on the machine.
+`just` prints available tasks. `just check-md` runs `pnpx markdownlint-cli2 .` across Markdown files. `just fix-md` applies markdownlint auto-fixes where possible. `just check-go` runs Go tests, `just fmt-go` formats Go files, and `just check` runs Markdown and Go checks. These commands require `just`, PowerShell, Go, and `pnpx`/Node tooling on the machine.
 
 ## Coding Style & Naming Conventions
 
@@ -28,7 +31,7 @@ Markdown linting is configured in `.markdownlint-cli2.yaml`; line length is inte
 
 ## Testing Guidelines
 
-Run `just check-md` before submitting changes. For documentation-only changes, this is the required validation. If future code is added, include the smallest runnable check that proves the changed behavior and document the command here.
+Run `just check` before submitting changes. For documentation-only changes, `just check-md` is enough. For Go changes, run `just check-go` at minimum.
 
 ## Commit & Pull Request Guidelines
 
