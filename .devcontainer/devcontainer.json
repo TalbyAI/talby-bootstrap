@@ -3,9 +3,17 @@
 {
 	"name": "Go",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/go:2-1.26-trixie",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": ".."
+	},
 	"features": {
-		"ghcr.io/devcontainers/features/node:2": {}
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainers-extra/features/ripgrep:1": {},
+		"ghcr.io/devcontainers/features/node:2": {},
+		"ghcr.io/devcontainers/features/docker-in-docker:4": {
+			"moby": false
+		}
 	},
 	"remoteUser": "vscode",
 	"containerUser": "vscode",
@@ -14,6 +22,8 @@
 		"CODEX_HOME": "/home/vscode/.codex"
 	},
 	"mounts": [
+		"source=talby-gh-config,target=/home/vscode/.config/gh,type=volume",
+		"source=talby-bootstrap-agents-home,target=/home/vscode/.agents,type=volume",
 		"source=talby-bootstrap-codex-home,target=/home/vscode/.codex,type=volume"
 	],
 	"postCreateCommand": "bash ${containerWorkspaceFolder}/.devcontainer/post-command.sh create",
