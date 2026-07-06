@@ -31,6 +31,7 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	if err := root.Execute(); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
 		return int(app.ExitOperationalOrValidationError)
 	}
 	return int(app.ExitSuccess)

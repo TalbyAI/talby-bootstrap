@@ -12,7 +12,7 @@ The CLI needs useful default output for humans and stable classification for aut
 
 Successful install and sync operations show a short **Operation Summary** by default. Extra detail is selected by **Verbosity Level**: `summary`, `normal`, or `verbose`.
 
-Machine-readable output uses one **JSON Output Envelope** with `code`, `message`, and `details`.
+Machine-readable output uses one **JSON Output Envelope** with `code`, `message`, `details`, `warnings`, and any recorded operation metadata.
 
 V1 uses four **Exit Codes**:
 

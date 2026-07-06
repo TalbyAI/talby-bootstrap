@@ -116,6 +116,7 @@ compare() {
 
   if [[ -z "${current_file}" ]]; then
     temp_file="$(mktemp)"
+    trap 'rm -f "${temp_file}"' RETURN
     write_snapshot > "${temp_file}"
     current_file="${temp_file}"
   fi
@@ -134,9 +135,6 @@ compare() {
     exit 1
   fi
 
-  if [[ -n "${temp_file}" ]]; then
-    rm -f "${temp_file}"
-  fi
 }
 
 main() {

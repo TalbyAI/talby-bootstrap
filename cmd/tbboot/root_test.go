@@ -46,8 +46,12 @@ func TestJSONOutputEnvelope(t *testing.T) {
 }
 
 func TestInvalidOutputModeFailsAsValidationError(t *testing.T) {
-	code := execute(context.Background(), []string{"--output", "xml", "install"}, &bytes.Buffer{}, &bytes.Buffer{})
+	var stderr bytes.Buffer
+	code := execute(context.Background(), []string{"--output", "xml", "install"}, &bytes.Buffer{}, &stderr)
 	if code != int(app.ExitOperationalOrValidationError) {
 		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if got := strings.TrimSpace(stderr.String()); got != `unsupported output mode "xml"` {
+		t.Fatalf("stderr = %q, want unsupported output message", got)
 	}
 }

@@ -1,6 +1,6 @@
 # Ubiquitous Language
 
-`CONTEXT.md` is the closed source for Talby Bootstrap v1 domain language. This document is the compact glossary used by architecture, ADRs, and implementation work.
+`CONTEXT.md` is the source of truth for Talby Bootstrap v1 domain language. This document is the compact glossary used by architecture, ADRs, and implementation work.
 
 ## Artifact publication
 
@@ -45,17 +45,17 @@
 
 ## Command and reporting
 
-| Term                  | Definition                                                                                  | Aliases to avoid                         |
-| --------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| **CLI Command Name**  | The executable name `tbboot`.                                                               | talby, tboot                             |
-| **Install Command**   | The primary command for declaring, reconciling, and materializing artifacts.                | sync command, add command                |
-| **Sync**              | The reconciliation operation that aligns actual state with the **Manifest**.                | Top-level command, apply-only command    |
-| **Upgrade Command**   | The command that advances already-declared artifacts or sources to newer resolved versions. | Sync alias, catalog refresh              |
-| **Search Command**    | The command that queries configured catalog caches and returns matching **Sources**.        | catalog admin command, repository search |
-| **Logs Command**      | The command that inspects recorded operations for an **Operation Root**.                    | Install-only subcommand, debug flag      |
-| **Operation Summary** | The default concise human-readable output after install or sync.                            | Full verbose log, success-only silence   |
-| **Operation Log**     | The replayable record of what happened during an operation.                                 | Default output, transient debug spew     |
-| **Exit Code**         | The process result code classifying command outcome for shells, CI, and automation.         | Message parsing, ad hoc status           |
+| Term                  | Definition                                                                                                                               | Aliases to avoid                         |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| **CLI Command Name**  | The executable name `tbboot`.                                                                                                            | talby, tboot                             |
+| **Install Command**   | The primary command for declaring, reconciling, and materializing artifacts.                                                             | sync command, add command                |
+| **Sync**              | The reconciliation operation that aligns actual state with the **Manifest** and the recorded **Lockfile** / derived **Resolution**.      | Top-level command, apply-only command    |
+| **Upgrade Command**   | The command that advances already-declared artifacts or sources to newer resolved versions.                                              | Sync alias, catalog refresh              |
+| **Search Command**    | The command that queries configured catalog caches and returns matching **Sources**.                                                     | catalog admin command, repository search |
+| **Logs Command**      | The command that inspects recorded operations for an **Operation Root**.                                                                 | Install-only subcommand, debug flag      |
+| **Operation Summary** | The default concise human-readable output after install or sync.                                                                         | Full verbose log, success-only silence   |
+| **Operation Log**     | The replayable record of what happened during an operation.                                                                              | Default output, transient debug spew     |
+| **Exit Code**         | The process result code classifying command outcome for shells, CI, and automation.                                                      | Message parsing, ad hoc status           |
 
 ## Relationships
 

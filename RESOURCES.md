@@ -5,7 +5,7 @@
 - Local skill: `superpowers:using-superpowers`
   Defines the rule for invoking relevant skills before acting. Use for: deciding whether a skill applies.
 - Local skill: `superpowers:brainstorming`
-  Turns an idea into an approved design/spec before implementation. Use for: conceptualizacion, product shaping, design approval.
+  Turns an idea into an approved design/spec before implementation. Use for: conceptualización, product shaping, design approval.
 - Local skill: `superpowers:writing-plans`
   Converts an approved spec into a detailed implementation plan. Use for: breaking work into testable, agent-executable tasks.
 - Local skill: `superpowers:using-git-worktrees`
