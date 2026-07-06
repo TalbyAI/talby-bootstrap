@@ -39,6 +39,7 @@ No Bubble Tea, Viper, materialization engine, catalog cache, or source resolutio
 ### Task 1: Require the current Go patch version
 
 **Files:**
+
 - Modify: none
 
 - [ ] **Step 1: Verify installed Go version**
@@ -78,6 +79,7 @@ If `go version` prints `go1.26.3`, stop and update Go first. The repo should sta
 ### Task 2: Create the Go module
 
 **Files:**
+
 - Create: `go.mod`
 - Create: `go.sum`
 
@@ -128,6 +130,7 @@ Expected: command exits successfully and writes `go.sum`.
 ### Task 3: Add command-independent result types
 
 **Files:**
+
 - Create: `internal/app/result.go`
 - Create: `internal/app/result_test.go`
 
@@ -139,21 +142,21 @@ package app
 type ExitCode int
 
 const (
-	ExitSuccess ExitCode = iota
-	ExitOperationalOrValidationError
-	ExitUserActionConflict
-	ExitTrustOrPolicyDenial
+ ExitSuccess ExitCode = iota
+ ExitOperationalOrValidationError
+ ExitUserActionConflict
+ ExitTrustOrPolicyDenial
 )
 
 type Result struct {
-	Code     ExitCode       `json:"code"`
-	Message  string         `json:"message"`
-	Details  map[string]any `json:"details,omitempty"`
-	Warnings []string       `json:"warnings,omitempty"`
+ Code     ExitCode       `json:"code"`
+ Message  string         `json:"message"`
+ Details  map[string]any `json:"details,omitempty"`
+ Warnings []string       `json:"warnings,omitempty"`
 }
 
 func Success(message string) Result {
-	return Result{Code: ExitSuccess, Message: message}
+ return Result{Code: ExitSuccess, Message: message}
 }
 ```
 
@@ -165,25 +168,25 @@ package app
 import "testing"
 
 func TestExitCodesMatchADR(t *testing.T) {
-	if ExitSuccess != 0 {
-		t.Fatalf("ExitSuccess = %d, want 0", ExitSuccess)
-	}
-	if ExitOperationalOrValidationError != 1 {
-		t.Fatalf("ExitOperationalOrValidationError = %d, want 1", ExitOperationalOrValidationError)
-	}
-	if ExitUserActionConflict != 2 {
-		t.Fatalf("ExitUserActionConflict = %d, want 2", ExitUserActionConflict)
-	}
-	if ExitTrustOrPolicyDenial != 3 {
-		t.Fatalf("ExitTrustOrPolicyDenial = %d, want 3", ExitTrustOrPolicyDenial)
-	}
+ if ExitSuccess != 0 {
+  t.Fatalf("ExitSuccess = %d, want 0", ExitSuccess)
+ }
+ if ExitOperationalOrValidationError != 1 {
+  t.Fatalf("ExitOperationalOrValidationError = %d, want 1", ExitOperationalOrValidationError)
+ }
+ if ExitUserActionConflict != 2 {
+  t.Fatalf("ExitUserActionConflict = %d, want 2", ExitUserActionConflict)
+ }
+ if ExitTrustOrPolicyDenial != 3 {
+  t.Fatalf("ExitTrustOrPolicyDenial = %d, want 3", ExitTrustOrPolicyDenial)
+ }
 }
 
 func TestSuccessResult(t *testing.T) {
-	got := Success("ok")
-	if got.Code != ExitSuccess || got.Message != "ok" {
-		t.Fatalf("Success() = %#v", got)
-	}
+ got := Success("ok")
+ if got.Code != ExitSuccess || got.Message != "ok" {
+  t.Fatalf("Success() = %#v", got)
+ }
 }
 ```
 
@@ -198,12 +201,13 @@ go test ./internal/app
 Expected:
 
 ```text
-ok  	github.com/talby/talby-bootstrap/internal/app
+ok   github.com/talby/talby-bootstrap/internal/app
 ```
 
 ### Task 4: Add the minimal Cobra command tree
 
 **Files:**
+
 - Create: `main.go`
 - Create: `cmd/tbboot/root.go`
 
@@ -213,13 +217,13 @@ ok  	github.com/talby/talby-bootstrap/internal/app
 package main
 
 import (
-	"os"
+ "os"
 
-	"github.com/talby/talby-bootstrap/cmd/tbboot"
+ "github.com/talby/talby-bootstrap/cmd/tbboot"
 )
 
 func main() {
-	os.Exit(tbboot.Execute())
+ os.Exit(tbboot.Execute())
 }
 ```
 
@@ -229,95 +233,95 @@ func main() {
 package tbboot
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"os"
+ "context"
+ "encoding/json"
+ "fmt"
+ "io"
+ "os"
 
-	"github.com/spf13/cobra"
-	"github.com/talby/talby-bootstrap/internal/app"
+ "github.com/spf13/cobra"
+ "github.com/talby/talby-bootstrap/internal/app"
 )
 
 const (
-	outputHuman = "human"
-	outputJSON  = "json"
+ outputHuman = "human"
+ outputJSON  = "json"
 )
 
 type options struct {
-	output string
+ output string
 }
 
 func Execute() int {
-	return execute(context.Background(), os.Args[1:], os.Stdout, os.Stderr)
+ return execute(context.Background(), os.Args[1:], os.Stdout, os.Stderr)
 }
 
 func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) int {
-	opts := options{output: outputHuman}
-	root := newRootCommand(ctx, &opts, stdout)
-	root.SetArgs(args)
-	root.SetOut(stdout)
-	root.SetErr(stderr)
-	if err := root.Execute(); err != nil {
-		return int(app.ExitOperationalOrValidationError)
-	}
-	return int(app.ExitSuccess)
+ opts := options{output: outputHuman}
+ root := newRootCommand(ctx, &opts, stdout)
+ root.SetArgs(args)
+ root.SetOut(stdout)
+ root.SetErr(stderr)
+ if err := root.Execute(); err != nil {
+  return int(app.ExitOperationalOrValidationError)
+ }
+ return int(app.ExitSuccess)
 }
 
 func newRootCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra.Command {
-	root := &cobra.Command{
-		Use:           "tbboot",
-		Short:         "Reconcile reusable repository artifacts",
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-	root.PersistentFlags().StringVar(&opts.output, "output", outputHuman, "output mode: human or json")
-	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		switch opts.output {
-		case outputHuman, outputJSON:
-			return nil
-		default:
-			return fmt.Errorf("unsupported output mode %q", opts.output)
-		}
-	}
-	root.AddCommand(
-		placeholderCommand(ctx, opts, stdout, "install", []string{"i"}, "Install or sync artifacts"),
-		placeholderCommand(ctx, opts, stdout, "upgrade", nil, "Upgrade declared artifacts"),
-		placeholderCommand(ctx, opts, stdout, "search", nil, "Search configured catalogs"),
-		placeholderCommand(ctx, opts, stdout, "logs", nil, "Replay recorded operations"),
-		catalogCommand(ctx, opts, stdout),
-	)
-	return root
+ root := &cobra.Command{
+  Use:           "tbboot",
+  Short:         "Reconcile reusable repository artifacts",
+  SilenceUsage:  true,
+  SilenceErrors: true,
+ }
+ root.PersistentFlags().StringVar(&opts.output, "output", outputHuman, "output mode: human or json")
+ root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+  switch opts.output {
+  case outputHuman, outputJSON:
+   return nil
+  default:
+   return fmt.Errorf("unsupported output mode %q", opts.output)
+  }
+ }
+ root.AddCommand(
+  placeholderCommand(ctx, opts, stdout, "install", []string{"i"}, "Install or sync artifacts"),
+  placeholderCommand(ctx, opts, stdout, "upgrade", nil, "Upgrade declared artifacts"),
+  placeholderCommand(ctx, opts, stdout, "search", nil, "Search configured catalogs"),
+  placeholderCommand(ctx, opts, stdout, "logs", nil, "Replay recorded operations"),
+  catalogCommand(ctx, opts, stdout),
+ )
+ return root
 }
 
 func catalogCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "catalog",
-		Short: "Manage catalogs",
-	}
-	cmd.AddCommand(
-		placeholderCommand(ctx, opts, stdout, "add", nil, "Add a catalog"),
-		placeholderCommand(ctx, opts, stdout, "list", nil, "List catalogs"),
-		placeholderCommand(ctx, opts, stdout, "refresh", nil, "Refresh catalog caches"),
-		placeholderCommand(ctx, opts, stdout, "remove", nil, "Remove a catalog"),
-	)
-	return cmd
+ cmd := &cobra.Command{
+  Use:   "catalog",
+  Short: "Manage catalogs",
+ }
+ cmd.AddCommand(
+  placeholderCommand(ctx, opts, stdout, "add", nil, "Add a catalog"),
+  placeholderCommand(ctx, opts, stdout, "list", nil, "List catalogs"),
+  placeholderCommand(ctx, opts, stdout, "refresh", nil, "Refresh catalog caches"),
+  placeholderCommand(ctx, opts, stdout, "remove", nil, "Remove a catalog"),
+ )
+ return cmd
 }
 
 func placeholderCommand(ctx context.Context, opts *options, stdout io.Writer, use string, aliases []string, short string) *cobra.Command {
-	return &cobra.Command{
-		Use:     use,
-		Aliases: aliases,
-		Short:   short,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			result := app.Success("not implemented")
-			if opts.output == outputJSON {
-				return json.NewEncoder(stdout).Encode(result)
-			}
-			_, err := fmt.Fprintln(stdout, result.Message)
-			return err
-		},
-	}
+ return &cobra.Command{
+  Use:     use,
+  Aliases: aliases,
+  Short:   short,
+  RunE: func(cmd *cobra.Command, args []string) error {
+   result := app.Success("not implemented")
+   if opts.output == outputJSON {
+    return json.NewEncoder(stdout).Encode(result)
+   }
+   _, err := fmt.Fprintln(stdout, result.Message)
+   return err
+  },
+ }
 }
 ```
 
@@ -334,6 +338,7 @@ Expected: command exits successfully.
 ### Task 5: Add CLI smoke tests
 
 **Files:**
+
 - Create: `cmd/tbboot/root_test.go`
 
 - [ ] **Step 1: Create `cmd/tbboot/root_test.go`**
@@ -342,55 +347,55 @@ Expected: command exits successfully.
 package tbboot
 
 import (
-	"bytes"
-	"context"
-	"strings"
-	"testing"
+ "bytes"
+ "context"
+ "strings"
+ "testing"
 
-	"github.com/talby/talby-bootstrap/internal/app"
+ "github.com/talby/talby-bootstrap/internal/app"
 )
 
 func TestHelpIncludesV1CommandSurfaces(t *testing.T) {
-	var stdout bytes.Buffer
-	code := execute(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{})
-	if code != int(app.ExitSuccess) {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	out := stdout.String()
-	for _, want := range []string{"install", "upgrade", "search", "logs", "catalog"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("help output missing %q:\n%s", want, out)
-		}
-	}
+ var stdout bytes.Buffer
+ code := execute(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{})
+ if code != int(app.ExitSuccess) {
+  t.Fatalf("exit code = %d, want 0", code)
+ }
+ out := stdout.String()
+ for _, want := range []string{"install", "upgrade", "search", "logs", "catalog"} {
+  if !strings.Contains(out, want) {
+   t.Fatalf("help output missing %q:\n%s", want, out)
+  }
+ }
 }
 
 func TestInstallAlias(t *testing.T) {
-	var stdout bytes.Buffer
-	code := execute(context.Background(), []string{"i"}, &stdout, &bytes.Buffer{})
-	if code != int(app.ExitSuccess) {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	if got := strings.TrimSpace(stdout.String()); got != "not implemented" {
-		t.Fatalf("stdout = %q, want not implemented", got)
-	}
+ var stdout bytes.Buffer
+ code := execute(context.Background(), []string{"i"}, &stdout, &bytes.Buffer{})
+ if code != int(app.ExitSuccess) {
+  t.Fatalf("exit code = %d, want 0", code)
+ }
+ if got := strings.TrimSpace(stdout.String()); got != "not implemented" {
+  t.Fatalf("stdout = %q, want not implemented", got)
+ }
 }
 
 func TestJSONOutputEnvelope(t *testing.T) {
-	var stdout bytes.Buffer
-	code := execute(context.Background(), []string{"--output", "json", "install"}, &stdout, &bytes.Buffer{})
-	if code != int(app.ExitSuccess) {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	if got := strings.TrimSpace(stdout.String()); !strings.Contains(got, `"message":"not implemented"`) {
-		t.Fatalf("stdout = %q, want JSON result", got)
-	}
+ var stdout bytes.Buffer
+ code := execute(context.Background(), []string{"--output", "json", "install"}, &stdout, &bytes.Buffer{})
+ if code != int(app.ExitSuccess) {
+  t.Fatalf("exit code = %d, want 0", code)
+ }
+ if got := strings.TrimSpace(stdout.String()); !strings.Contains(got, `"message":"not implemented"`) {
+  t.Fatalf("stdout = %q, want JSON result", got)
+ }
 }
 
 func TestInvalidOutputModeFailsAsValidationError(t *testing.T) {
-	code := execute(context.Background(), []string{"--output", "xml", "install"}, &bytes.Buffer{}, &bytes.Buffer{})
-	if code != int(app.ExitOperationalOrValidationError) {
-		t.Fatalf("exit code = %d, want 1", code)
-	}
+ code := execute(context.Background(), []string{"--output", "xml", "install"}, &bytes.Buffer{}, &bytes.Buffer{})
+ if code != int(app.ExitOperationalOrValidationError) {
+  t.Fatalf("exit code = %d, want 1", code)
+ }
 }
 ```
 
@@ -405,13 +410,14 @@ go test ./...
 Expected:
 
 ```text
-ok  	github.com/talby/talby-bootstrap/cmd/tbboot
-ok  	github.com/talby/talby-bootstrap/internal/app
+ok   github.com/talby/talby-bootstrap/cmd/tbboot
+ok   github.com/talby/talby-bootstrap/internal/app
 ```
 
 ### Task 6: Add Go tasks to `justfile`
 
 **Files:**
+
 - Modify: `justfile`
 
 - [ ] **Step 1: Inspect the existing tasks**
@@ -461,6 +467,7 @@ Expected: `go test ./...` passes.
 ### Task 7: Update repository instructions
 
 **Files:**
+
 - Modify: `AGENTS.md`
 
 - [ ] **Step 1: Update project structure**
@@ -505,6 +512,7 @@ Expected: Markdown lint passes.
 ### Task 8: Final validation
 
 **Files:**
+
 - Modify: none
 
 - [ ] **Step 1: Format Go**
