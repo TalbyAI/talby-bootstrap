@@ -31,7 +31,15 @@
 		"source=talby-bootstrap-codex-home,target=/home/vscode/.codex,type=volume"
 	],
 	"postCreateCommand": "bash ${containerWorkspaceFolder}/.devcontainer/post-command.sh create",
-	"postStartCommand": "bash ${containerWorkspaceFolder}/.devcontainer/post-command.sh start"
+	"postStartCommand": "bash ${containerWorkspaceFolder}/.devcontainer/post-command.sh start",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"nefrob.vscode-just-syntax",
+				"golang.go"
+			]
+		}
+	}
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
