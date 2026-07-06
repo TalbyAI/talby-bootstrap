@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Superpowers Lifecycle Cheatsheet</title>
+  <style>
+    body { margin: 0; font-family: Inter, Segoe UI, Arial, sans-serif; color: #1f2937; background: #f7f7f4; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: 0; }
+    p { line-height: 1.55; }
+    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d8d8d2; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid #e5e5df; text-align: left; vertical-align: top; }
+    th { background: #e9ece7; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+    code { background: #eef2f7; padding: 2px 5px; border-radius: 4px; }
+    .rule { margin: 18px 0; padding: 14px 16px; border-left: 4px solid #2563eb; background: #fff; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Superpowers Lifecycle Cheatsheet</h1>
+  <p>Usa esta tabla para elegir el siguiente skill. La pregunta clave no es "que quiero hacer", sino "que artefacto necesito antes de seguir".</p>
+  <div class="rule"><strong>Regla corta:</strong> idea -&gt; spec aprobada -&gt; plan -&gt; worktree -&gt; TDD -&gt; reviews -&gt; verificacion -&gt; merge/PR.</div>
+  <table>
+    <thead>
+      <tr><th>Fase</th><th>Skill</th><th>Salida minima</th><th>No avances si falta...</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Conceptualizacion</td><td><code>superpowers:brainstorming</code></td><td>Intencion, alcance, restricciones, exito observable.</td><td>Aprobacion del diseno.</td></tr>
+      <tr><td>Arquitectura y diseno</td><td><code>superpowers:brainstorming</code></td><td>Spec en <code>docs/superpowers/specs/</code>.</td><td>Spec revisada por el usuario.</td></tr>
+      <tr><td>Planificacion</td><td><code>superpowers:writing-plans</code></td><td>Plan en <code>docs/superpowers/plans/</code> con tareas pequenas.</td><td>Pasos verificables y sin placeholders.</td></tr>
+      <tr><td>Preparacion</td><td><code>superpowers:using-git-worktrees</code></td><td>Workspace aislado o decision explicita de trabajar en sitio.</td><td>Baseline claro.</td></tr>
+      <tr><td>Implementacion</td><td><code>superpowers:test-driven-development</code> + <code>subagent-driven-development</code></td><td>Tests red/green, commits pequenos, task reviews.</td><td>Test fallando primero.</td></tr>
+      <tr><td>Alternativa simple</td><td><code>superpowers:executing-plans</code></td><td>Plan ejecutado inline con checks.</td><td>Plan cargado y revisado.</td></tr>
+      <tr><td>Revision</td><td><code>superpowers:requesting-code-review</code> / <code>receiving-code-review</code></td><td>Feedback evaluado y aplicado si procede.</td><td>SHA base/head o contexto exacto.</td></tr>
+      <tr><td>Publicacion</td><td><code>verification-before-completion</code> + <code>finishing-a-development-branch</code></td><td>Tests frescos y menu: merge, PR, keep, discard.</td><td>Evidencia reciente.</td></tr>
+    </tbody>
+  </table>
+</main>
+</body>
+</html>

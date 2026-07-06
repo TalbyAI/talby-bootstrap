@@ -26,7 +26,7 @@ _Avoid_: Repository root, inferred location
 
 **Source**:
 A concrete origin that can resolve and deliver one or more **Artifacts**. A source may be a local private folder, a repository on GitHub or another code host, or another retrievable content location that defines artifacts or artifact definitions.
-_Avoid_: Catalog, channel
+_Avoid_: Catalog
 
 **Source Type**:
 The explicit classification of a **Source** that determines how the CLI connects to it and resolves artifacts from it. In v1, only `file` and `git` are supported source types for approval and resolution.
@@ -63,10 +63,6 @@ _Avoid_: Catalog entry, inferred lookup
 **Catalog Install Reference**:
 The catalog-qualified install reference a user can provide when resolving through a configured **Catalog** instead of naming a typed **Source** directly. Its canonical form identifies the configured catalog name and the catalog-local source name as `{catalog-name}/{catalog-source-name}`, with an optional artifact selector provided separately. Without an artifact selector, it installs the resolved **Source** as a whole using the same semantics as a direct source install.
 _Avoid_: Direct source reference, implicit global lookup
-
-**Channel**:
-A higher-level distribution entry point that groups one or more **Catalogs** into a consumable feed, similar to a marketplace track.
-_Avoid_: Catalog, source
 
 **Manifest**:
 A versioned file in a consumer repository that declares which **Artifacts** should be installed there, including enough source identity to re-resolve them stably even if the lockfile must be regenerated. The stable source identity is normative; any preserved original user-facing reference is optional metadata only.
@@ -157,7 +153,7 @@ The primary user-facing command for artifact management. The canonical command i
 _Avoid_: sync command, add command
 
 **Upgrade Command**:
-The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With one explicit target, it reuses the same unambiguous target forms as `install`: typed source, catalog-qualified source, or shorthand only when uniquely resolved. V1 does not accept multiple explicit upgrade targets in a single command. Source targets upgrade the whole declared source; artifact targets upgrade only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. Bare `upgrade` applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. By default it advances each eligible target to the latest stable published version allowed by the active trust policy. Versions skipped because of trust or age rules are reported in more verbose output, not in the default short summary. The canonical command name is `upgrade`; `install --upgrade` is an equivalent shortcut when the user wants install-style targeting with upgrade behavior.
+The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With one explicit target, it accepts the same unambiguous source forms as `install`, optionally narrowed with `--artifact`. V1 does not accept multiple explicit upgrade targets in a single command. Source targets upgrade the whole declared source; `--artifact` upgrades only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. Bare `upgrade` applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. By default it advances each eligible target to the latest stable published version allowed by the active trust policy. Versions skipped because of trust or age rules are reported in more verbose output, not in the default short summary. The canonical command name is `upgrade`; `install --upgrade` is an equivalent shortcut when the user wants install-style targeting with upgrade behavior.
 _Avoid_: Sync alias, catalog refresh
 
 **Operation Summary**:
@@ -191,10 +187,6 @@ _Avoid_: Session cwd only, global implicit scope
 **Operation Root Key**:
 The stable storage key derived from a normalized **Operation Root** to store recorded operations under the **User Configuration Directory**. The root path itself is preserved as readable metadata alongside the stored logs.
 _Avoid_: Raw long path, ad hoc folder name
-
-**Main Artifact**:
-The canonical artifact of a **Source** used as the shorthand install target when a user installs by bare name through configured **Catalogs**.
-_Avoid_: Default guess, arbitrary first artifact
 
 **Declare-Only Install**:
 An **Install Command** mode enabled by `--declare-only` that updates only the **Manifest** without materializing artifacts, updating the **Lockfile**, or touching cache state. This remains true for direct source installs and catalog-qualified installs.
@@ -297,7 +289,6 @@ _Avoid_: Expected update, normal sync
 - A **Catalog** references one or more **Sources** and the **Artifacts** they provide
 - A **Catalog Reference** identifies the catalog being registered by **Catalog Add**
 - A **Catalog** is an index for discovery, not the source of truth for an **Artifact**
-- A **Channel** groups one or more **Catalogs**
 - A **Manifest** belongs to one consumer repository
 - A **Manifest** has exactly one canonical **Manifest Format**
 - A **Manifest** has exactly one canonical **Manifest Filename**
@@ -319,7 +310,6 @@ _Avoid_: Expected update, normal sync
 - A whole-**Source** resolution in the **Lockfile** includes the exact resolved **Artifacts** and their versions
 - An **Overwrite Policy** may inspect Git state before replacing files
 - The **Artifact Management Surface** is centered on the **Install Command**
-- A bare `install <name>` resolves against configured **Catalogs** by matching the **Main Artifact**
 - A bare `install <name>` may proceed only when the matching catalog entries resolve to one unique source identity, or all hits collapse to the same source and source version
 - A command may render results through the **JSON Output Envelope** when machine-readable output is requested
 - An **Exit Code** classifies command outcome as success, operational error, user-action conflict, or trust/policy denial
@@ -423,7 +413,7 @@ _Avoid_: Expected update, normal sync
 ## Flagged ambiguities
 
 - "pattern", "snippet", and "module" were used for the same concept — resolved: use **Artifact** as the canonical term
-- "source", "catalog", and "channel" could be conflated — resolved: **Source** delivers, **Catalog** indexes, **Channel** groups catalogs
+- "source" and "catalog" could be conflated — resolved: **Source** delivers, while **Catalog** indexes
 - "manifest" and "lockfile" could be conflated — resolved: **Manifest** declares intent, **Lockfile** stores exact resolution
 - artifact identity could be ambiguous across sources — resolved: an **Artifact Name** is source-local, and stable identity is **Source + Artifact Name**
 - whole-source install behavior could be unsafe by default — resolved: default to **Pinned Source** and require explicit opt-in for **Floating Source**
@@ -479,7 +469,6 @@ _Avoid_: Expected update, normal sync
 - source-type sprawl could outpace the trust model — resolved: v1 supports only `file` and `git` as approvable **Source Types**
 - direct and catalog-qualified installs could collapse into one ambiguous syntax — resolved: typed-source installs use **Direct Install Reference**, while catalog-qualified installs use **Catalog Install Reference**
 - catalog-qualified source installs could diverge semantically from direct source installs — resolved: a **Catalog** is only an index of sources, so `{catalog-name}/{catalog-source-name}` without an artifact selector installs the same whole **Source** a direct reference would resolve
-- bare install shorthand could become too magical — resolved: bare `install <name>` searches configured **Catalogs** for a matching **Main Artifact** source and proceeds only when the result collapses to one source identity and source version
 - CLI output could fragment across human and automation use cases — resolved: v1 uses one **JSON Output Envelope** with `code`, `message`, and `details` when JSON output is requested
 - error handling could become too granular or too vague for automation — resolved: v1 uses four **Exit Codes** only: `0` success, `1` operational or validation error, `2` user-action conflict, `3` trust or policy denial
 - whole-file drift could behave differently from fragment drift — resolved: whole-file managed content also prompts before update or removal when it no longer matches the prior **Materialization Record**
@@ -500,7 +489,7 @@ _Avoid_: Expected update, normal sync
 - catalog refresh scope could diverge from global search/install resolution — resolved: `catalog refresh` without arguments refreshes all configured catalogs
 - catalog removal could target the wrong identity layer — resolved: `catalog remove` targets the configured local catalog name, not the remote catalog reference
 - search could blur into accidental catalog dumping — resolved: non-interactive `search` requires an explicit query, leaving queryless exploration to a future interactive mode
-- declare-only behavior could drift between install modes — resolved: `--declare-only` updates only the **Manifest** for direct, catalog-qualified, and shorthand installs alike
+- declare-only behavior could drift between install modes — resolved: `--declare-only` updates only the **Manifest** for direct and catalog-qualified installs alike
 - multi-target install could overcomplicate prompts, conflicts, and rollback — resolved: v1 allows only one explicit install target per command, while bare `install` remains the **Sync** entrypoint
 - install target parsing could become precedence-driven and surprising — resolved: ambiguous target syntax fails and requires an explicit unambiguous install form
 - supported source types could still have unsafe default trust rules — resolved: `file:` is allowed by default only inside the current **Operation Root**, while `git:` always requires explicit manifest approval
@@ -519,7 +508,7 @@ _Avoid_: Expected update, normal sync
 - deterministic upgrade ordering could still be underspecified — resolved: global `upgrade` processes whole sources before individual artifacts, with lexicographic ordering by normalized identity inside each group
 - upgrade output could blur intent and resolution — resolved: successful `upgrade` writes the new exact version only to the **Lockfile**, not to the **Manifest**, unless declared intent changes
 - first-time manifest reconciliation could leave reproducibility unbootstrapped — resolved: `install` without an existing **Lockfile** resolves from the **Manifest** and creates the lockfile during that operation
-- shorthand or catalog-based declarations could become unstable after lockfile loss — resolved: the **Manifest** stores enough source identity to re-resolve declared targets stably without depending on fresh search ambiguity
+- catalog-based declarations could become unstable after lockfile loss — resolved: the **Manifest** stores enough source identity to re-resolve declared targets stably without depending on fresh search ambiguity
 - manifest entries could end up with two competing truths — resolved: only stable source identity is normative in the **Manifest**, while any original user-facing reference is optional metadata only
 
 ## Interview state
@@ -549,7 +538,6 @@ This section preserves the current specification interview state by explicit use
     - **Direct Install Reference** uses typed-source syntax `{source-type}:{source-name}`
     - catalog-qualified install syntax uses `{catalog-name}/{catalog-source-name}`
     - catalog-qualified source installs and direct source installs share the same whole-source semantics
-    - bare `install <name>` resolves through configured catalogs by matching the **Main Artifact** and requires a unique collapsed source result
     - **Search Command** returns sources as the primary result unit, with artifact detail controlled by flags
     - each configured catalog has a unique local name, and conflicting local names make **Catalog Add** fail explicitly
     - successful install and sync operations show a short **Operation Summary** by default, with deeper follow-up inspection via **Logs Command** and **Operation ID**
@@ -565,7 +553,7 @@ This section preserves the current specification interview state by explicit use
     - `catalog refresh` without arguments refreshes all configured catalogs
     - `catalog remove` canonically targets the configured local catalog name
     - non-interactive `search` requires an explicit query
-    - `--declare-only` updates only the **Manifest** across direct, catalog-qualified, and shorthand installs
+    - `--declare-only` updates only the **Manifest** across direct and catalog-qualified installs
     - v1 `install` accepts only one explicit target per command
     - ambiguous install target syntax fails until the user provides an explicit unambiguous form
     - reconciliation is triggered by bare `install`; **Sync** is the underlying operation, not a separate top-level command
@@ -683,4 +671,4 @@ This section preserves the current specification interview state by explicit use
 
 - interactive terminal mode for browsing catalogs, searching sources, and inspecting logs without composing full commands
 - additional source types beyond `file` and `git`
-- richer version selection controls such as channels, ranges, or upgrade policies beyond "latest stable allowed"
+- richer version selection controls such as ranges or upgrade policies beyond "latest stable allowed"
