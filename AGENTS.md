@@ -19,7 +19,7 @@ just fmt-go
 just check
 ```
 
-`just` prints available tasks. `just check-md` runs `pnpx markdownlint-cli2 .` across Markdown files. `just fix-md` applies markdownlint auto-fixes where possible. `just check-go` runs Go tests, `just fmt-go` formats Go files, and `just check` runs Markdown and Go checks. These commands require `just`, PowerShell, Go, and `pnpx`/Node tooling on the machine.
+`just` prints available tasks. `just check-md` runs `npx -y markdownlint-cli2 .` across Markdown files. `just fix-md` applies markdownlint auto-fixes where possible. `just check-go` runs Go tests, `just fmt-go` formats Go files, and `just check` runs Markdown and Go checks. These commands require `just`, PowerShell, Go, and Node/npm tooling on the machine.
 
 ## Coding Style & Naming Conventions
 

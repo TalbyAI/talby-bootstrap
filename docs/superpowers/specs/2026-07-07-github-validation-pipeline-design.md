@@ -38,7 +38,7 @@ Jobs:
 - `markdown`
   - Runs on `ubuntu-latest`
   - Checks out the repository
-  - Installs Node.js because `just check-md` uses `pnpx`
+  - Installs Node.js because `just check-md` uses `npx -y`
   - Installs `just`
   - Runs `just check-md`
 - `go`
