@@ -113,7 +113,7 @@ The runner executes represented commands from the staged consumer root, not from
 
 For v1, the runner should execute with stdin closed and without an interactive TTY. Examples that cover **JSON Output Envelope** behavior must request JSON explicitly in `commands[].argv`; examples that cover prompt-required failures should rely on the documented non-interactive contract rather than on an implicit interactive mode.
 
-Because `file:` sources are allowed by default only when they are inside the current **Operation Root**, examples that expect default `file:` approval should use locators under `.tbboot-example/sources/`. Examples that need to prove outside-root denial should say so explicitly in their `README.md` and use a locator that the runner stages outside the consumer root for that example.
+Because `file:` sources are allowed by default only when they are inside the current **Operation Root**, examples that expect default `file:` approval should use locators under `.tbboot-example/sources/`. Outside-root denial fixtures are deferred from v1 until the runner has an explicit contract for staging state outside the consumer root. Until then, example authors should not rely on an implied outside-root path shape in this library.
 
 ## Verification mode contract
 
@@ -233,6 +233,6 @@ This allows the same example library to support human review and machine verific
 ## Deferred work
 
 - Add a root `testdata/examples/README.md` that explains the library once the first examples exist.
-- Decide later whether `example.yaml` needs fields for environment setup, runner-staged outside-root fixtures, trust configuration overlays, or multi-command sequences beyond simple argv lists.
+- Decide later whether `example.yaml` needs fields for environment setup, explicit runner-staged outside-root fixtures, trust configuration overlays, or multi-command sequences beyond simple argv lists.
 - Defer `logs`-focused examples until operation persistence behavior exists in code.
 - Treat the current library as intentionally install-centered until the next command family creates concrete pressure to extend the schema; see `docs/reviews/2026-07-07-example-library-scope-follow-up.md`.

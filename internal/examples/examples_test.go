@@ -97,6 +97,55 @@ func TestDiscoverRejectsVerificationFileMismatch(t *testing.T) {
 	}
 }
 
+func TestDiscoverRejectsInvalidVerificationValue(t *testing.T) {
+	root := t.TempDir()
+	exampleDir := filepath.Join(root, "atomic-cases", "bad-verification")
+
+	mkdirAll(t, filepath.Join(root, "scenarios"))
+	mkdirAll(t, filepath.Join(exampleDir, "source"))
+	mkdirAll(t, filepath.Join(exampleDir, "consumer"))
+	mkdirAll(t, filepath.Join(exampleDir, "expected"))
+
+	writeFile(t, filepath.Join(root, "README.md"), "# Examples\n")
+	writeFile(t, filepath.Join(exampleDir, "README.md"), "# Bad Verification\n")
+	writeFile(t, filepath.Join(exampleDir, "example.yaml"), ""+
+		"schema_version: 1\n"+
+		"id: bad-verification\n"+
+		"kind: atomic-case\n"+
+		"polarity: positive\n"+
+		"summary: Invalid verification value.\n"+
+		"commands:\n"+
+		"  - argv:\n"+
+		"      - tbboot\n"+
+		"      - install\n"+
+		"verification:\n"+
+		"  exit_code: exact\n"+
+		"  stdout_text: contians\n"+
+		"  stdout_json: absent\n"+
+		"  consumer_state: absent\n"+
+		"normative_outputs:\n"+
+		"  - expected/exit-code.txt\n")
+	writeFile(t, filepath.Join(exampleDir, "source", "talby-source.yaml"), ""+
+		"schema_version: 1\n"+
+		"source:\n"+
+		"  name: example\n"+
+		"artifacts: []\n")
+	writeFile(t, filepath.Join(exampleDir, "expected", "exit-code.txt"), "0\n")
+
+	_, err := Discover(root)
+	if err == nil {
+		t.Fatal("Discover() error = nil, want invalid verification error")
+	}
+
+	if got := err.Error(); got == "" || !containsAll(got,
+		"bad-verification",
+		"verification.stdout_text",
+		"contians",
+	) {
+		t.Fatalf("error = %q, want invalid stdout_text rejection", got)
+	}
+}
+
 func TestDiscoverRejectsSourceDescriptorTypeField(t *testing.T) {
 	root := t.TempDir()
 	exampleDir := filepath.Join(root, "atomic-cases", "bad-source-type")

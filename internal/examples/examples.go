@@ -145,6 +145,9 @@ func validateMetadata(path string, parentGroup string, meta Metadata) error {
 			return fmt.Errorf("%s: command argv must not be empty", meta.ID)
 		}
 	}
+	if err := validateVerification(meta.ID, meta.Verification); err != nil {
+		return err
+	}
 
 	requiredOutputs := []string{"expected/exit-code.txt"}
 	requiredOutputs = append(requiredOutputs, expectedOutputsForVerification(meta.Verification)...)
@@ -162,6 +165,33 @@ func validateMetadata(path string, parentGroup string, meta Metadata) error {
 	}
 
 	return nil
+}
+
+func validateVerification(exampleID string, verification Verification) error {
+	if !isOneOf(verification.ExitCode, "exact", "class") {
+		return fmt.Errorf("%s: verification.exit_code = %q, want exact or class", exampleID, verification.ExitCode)
+	}
+	if !isOneOf(verification.StdoutText, "exact", "contains", "absent") {
+		return fmt.Errorf("%s: verification.stdout_text = %q, want exact, contains, or absent", exampleID, verification.StdoutText)
+	}
+	if !isOneOf(verification.StdoutJSON, "exact", "contains", "absent") {
+		return fmt.Errorf("%s: verification.stdout_json = %q, want exact, contains, or absent", exampleID, verification.StdoutJSON)
+	}
+	if !isOneOf(verification.ConsumerState, "exact", "absent") {
+		return fmt.Errorf("%s: verification.consumer_state = %q, want exact or absent", exampleID, verification.ConsumerState)
+	}
+
+	return nil
+}
+
+func isOneOf(got string, wants ...string) bool {
+	for _, want := range wants {
+		if got == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 func singularKind(parentGroup string) string {
