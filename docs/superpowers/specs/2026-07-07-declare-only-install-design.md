@@ -152,6 +152,7 @@ Conceptually:
 
 ```go
 type Request struct {
+    Root        string
     Source      source.Ref
     Artifact    string
     DeclareOnly bool

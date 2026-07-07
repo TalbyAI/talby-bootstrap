@@ -21,7 +21,7 @@
 
 - Modify: `internal/install/service.go` - add `DeclareOnly` request handling, repository root input, typed change result, manifest bootstrap/load/write path, and typed conflict error.
 - Modify: `internal/install/service_test.go` - add declare-only service coverage for separate repository/source roots, bootstrap, root validation, no-op, conflict, and no-lockfile behavior.
-- Modify: `cmd/tbboot/install.go` - add `--declare-only`, require `<source>` in that mode, pass the current working directory to the service, and render declare-only human/JSON success output.
+- Modify: `cmd/tbboot/install.go` - add `--declare-only`, require `<source>` in that mode, resolve and pass the repository root to the service, and render declare-only human/JSON success output.
 - Modify: `cmd/tbboot/root.go` - map declare-only conflict errors to exit code `2` in both human and JSON output paths.
 - Modify: `cmd/tbboot/root_test.go` - cover declare-only success, JSON output, missing-source validation, and conflict exit-path behavior for both human and JSON output.
 
