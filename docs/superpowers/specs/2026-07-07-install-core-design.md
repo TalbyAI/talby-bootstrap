@@ -120,13 +120,13 @@ The exact method shape may vary, but the behavior should support:
 
 - a real registry used by the CLI and internal integration tests;
 - a test registry that can replace `file` and `git` implementations with doubles or fakes;
-- future registration of new source kinds without changing the install core.
+- future registration of new Source Types without changing the install core.
 
 The first iteration should include a real `file` registration path. `git` should be anticipated in the model but does not need a real behavioral implementation yet.
 
 ### Source capabilities
 
-`Source` should explicitly report what it can do. The core should reason about capabilities instead of hard-coding assumptions about source kinds.
+`Source` should explicitly report what it can do. The core should reason about capabilities instead of hard-coding assumptions about Source Types.
 
 Capabilities that matter already for forward compatibility include:
 

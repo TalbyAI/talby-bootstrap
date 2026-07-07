@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/talby/talby-bootstrap/internal/app"
 	installsvc "github.com/talby/talby-bootstrap/internal/install"
 	"github.com/talby/talby-bootstrap/internal/source"
 	sourcefile "github.com/talby/talby-bootstrap/internal/source/file"
@@ -37,11 +38,20 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 	}))
 
 	cmd := &cobra.Command{
-		Use:     "install <source>",
+		Use:     "install [<source>]",
 		Aliases: []string{"i"},
 		Short:   "Install or sync artifacts",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				result := app.Success("sync not implemented")
+				if opts.output == outputJSON {
+					return json.NewEncoder(stdout).Encode(result)
+				}
+				_, err := fmt.Fprintln(stdout, result.Message)
+				return err
+			}
+
 			ref, err := parseSourceRef(args[0])
 			if err != nil {
 				return err
@@ -55,7 +65,12 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 			}
 
 			if opts.output == outputJSON {
-				return json.NewEncoder(stdout).Encode(mapInstallResult(result))
+				envelope := app.Success("install succeeded")
+				envelope.Details = map[string]any{
+					"source":   mapSourceIdentity(result.Source),
+					"artifact": mapArtifactDescriptor(result.Artifact),
+				}
+				return json.NewEncoder(stdout).Encode(envelope)
 			}
 
 			_, err = fmt.Fprintf(stdout, "selected artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
@@ -69,16 +84,24 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 
 func mapInstallResult(result installsvc.Result) installResultJSON {
 	return installResultJSON{
-		Source: sourceIdentityJSON{
-			Type:    result.Source.Type,
-			Name:    result.Source.Name,
-			Version: result.Source.Version,
-		},
-		Artifact: artifactDescriptorJSON{
-			Name:    result.Artifact.Name,
-			Version: result.Artifact.Version,
-			Path:    result.Artifact.Path,
-		},
+		Source:   mapSourceIdentity(result.Source),
+		Artifact: mapArtifactDescriptor(result.Artifact),
+	}
+}
+
+func mapSourceIdentity(identity source.Identity) sourceIdentityJSON {
+	return sourceIdentityJSON{
+		Type:    identity.Type,
+		Name:    identity.Name,
+		Version: identity.Version,
+	}
+}
+
+func mapArtifactDescriptor(artifact source.ArtifactDescriptor) artifactDescriptorJSON {
+	return artifactDescriptorJSON{
+		Name:    artifact.Name,
+		Version: artifact.Version,
+		Path:    artifact.Path,
 	}
 }
 

@@ -40,14 +40,14 @@ func TestInstallAlias(t *testing.T) {
 	}
 }
 
-func TestInstallCommandRequiresSourceArgument(t *testing.T) {
-	var stderr bytes.Buffer
-	code := execute(context.Background(), []string{"install"}, &bytes.Buffer{}, &stderr)
-	if code != int(app.ExitOperationalOrValidationError) {
-		t.Fatalf("exit code = %d, want 1", code)
+func TestInstallCommandWithoutSourceRunsSyncShape(t *testing.T) {
+	var stdout bytes.Buffer
+	code := execute(context.Background(), []string{"install"}, &stdout, &bytes.Buffer{})
+	if code != int(app.ExitSuccess) {
+		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if got := strings.TrimSpace(stderr.String()); got != "accepts 1 arg(s), received 0" {
-		t.Fatalf("stderr = %q, want exact-args error", got)
+	if got := strings.TrimSpace(stdout.String()); got != "sync not implemented" {
+		t.Fatalf("stdout = %q, want sync placeholder message", got)
 	}
 }
 
@@ -79,33 +79,37 @@ func TestJSONOutputEnvelope(t *testing.T) {
 	if code != int(app.ExitSuccess) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	raw := stdout.String()
-	if !strings.Contains(raw, `"source":`) || strings.Contains(raw, `"Source":`) {
-		t.Fatalf("stdout = %q, want CLI JSON field names", raw)
-	}
-	if !strings.Contains(raw, `"artifact":`) || strings.Contains(raw, `"Artifact":`) {
-		t.Fatalf("stdout = %q, want CLI JSON field names", raw)
-	}
 	var got struct {
-		Source struct {
-			Type    string `json:"type"`
-			Name    string `json:"name"`
-			Version string `json:"version"`
-		} `json:"source"`
-		Artifact struct {
-			Name    string `json:"name"`
-			Version string `json:"version"`
-			Path    string `json:"path"`
-		} `json:"artifact"`
+		Code     int               `json:"code"`
+		Message  string            `json:"message"`
+		Details  map[string]any    `json:"details"`
+		Warnings []string          `json:"warnings"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("Unmarshal(stdout) error = %v", err)
 	}
-	if got.Source.Name != "local-example-source" {
-		t.Fatalf("source.name = %q, want local-example-source", got.Source.Name)
+	if got.Code != int(app.ExitSuccess) {
+		t.Fatalf("code = %d, want 0", got.Code)
 	}
-	if got.Artifact.Name != "base-readme" {
-		t.Fatalf("artifact.name = %q, want base-readme", got.Artifact.Name)
+	if got.Message != "install succeeded" {
+		t.Fatalf("message = %q, want install succeeded", got.Message)
+	}
+	sourceDetails, ok := got.Details["source"].(map[string]any)
+	if !ok {
+		t.Fatalf("details.source = %#v, want object", got.Details["source"])
+	}
+	artifactDetails, ok := got.Details["artifact"].(map[string]any)
+	if !ok {
+		t.Fatalf("details.artifact = %#v, want object", got.Details["artifact"])
+	}
+	if sourceDetails["name"] != "local-example-source" {
+		t.Fatalf("details.source.name = %#v, want local-example-source", sourceDetails["name"])
+	}
+	if artifactDetails["name"] != "base-readme" {
+		t.Fatalf("details.artifact.name = %#v, want base-readme", artifactDetails["name"])
+	}
+	if _, ok := got.Details["code"]; ok {
+		t.Fatalf("details.code present in details: %#v", got.Details)
 	}
 }
 
