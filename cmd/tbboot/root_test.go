@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/talby/talby-bootstrap/internal/app"
+	"github.com/talby/talby-bootstrap/internal/repositorystate"
 )
 
 func TestHelpIncludesV1CommandSurfaces(t *testing.T) {
@@ -80,10 +82,10 @@ func TestJSONOutputEnvelope(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	var got struct {
-		Code     int               `json:"code"`
-		Message  string            `json:"message"`
-		Details  map[string]any    `json:"details"`
-		Warnings []string          `json:"warnings"`
+		Code     int            `json:"code"`
+		Message  string         `json:"message"`
+		Details  map[string]any `json:"details"`
+		Warnings []string       `json:"warnings"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("Unmarshal(stdout) error = %v", err)
@@ -144,6 +146,274 @@ func TestJSONOutputErrorsGoToStderrAsJSON(t *testing.T) {
 	}
 	if result.Message != "source must be formatted as <type>:<locator>" {
 		t.Fatalf("result.message = %q, want source parse error", result.Message)
+	}
+}
+
+func TestDeclareOnlyConflictReturnsUserActionConflictExitCode(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+	writeTestFile(t, filepath.Join(repoRoot, "talby-artifacts.yaml"), ""+
+		"schema_version: 1\n"+
+		"declarations:\n"+
+		"  - source:\n"+
+		"      type: file\n"+
+		"      name: local-example-source\n"+
+		"    target:\n"+
+		"      scope: artifact\n"+
+		"      artifact: base-readme\n"+
+		"    input:\n"+
+		"      locator: /tmp/other\n")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"install", "file:" + repoRoot, "--artifact", "base-readme", "--declare-only"},
+		&bytes.Buffer{},
+		&stderr,
+	)
+	if code != int(app.ExitUserActionConflict) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitUserActionConflict)
+	}
+	if got := strings.TrimSpace(stderr.String()); got != `artifact "base-readme" from source "local-example-source" is already declared with different input; use upgrade` {
+		t.Fatalf("stderr = %q, want conflict message", got)
+	}
+}
+
+func TestDeclareOnlyConflictReturnsUserActionConflictExitCodeAsJSON(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+	writeTestFile(t, filepath.Join(repoRoot, "talby-artifacts.yaml"), ""+
+		"schema_version: 1\n"+
+		"declarations:\n"+
+		"  - source:\n"+
+		"      type: file\n"+
+		"      name: local-example-source\n"+
+		"    target:\n"+
+		"      scope: artifact\n"+
+		"      artifact: base-readme\n"+
+		"    input:\n"+
+		"      locator: /tmp/other\n")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"--output", "json", "install", "file:" + repoRoot, "--artifact", "base-readme", "--declare-only"},
+		&stdout,
+		&stderr,
+	)
+	if code != int(app.ExitUserActionConflict) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitUserActionConflict)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+
+	var result app.Result
+	if err := json.Unmarshal(stderr.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(stderr) error = %v", err)
+	}
+	if result.Code != app.ExitUserActionConflict {
+		t.Fatalf("result.code = %d, want %d", result.Code, app.ExitUserActionConflict)
+	}
+	if result.Message != `artifact "base-readme" from source "local-example-source" is already declared with different input; use upgrade` {
+		t.Fatalf("result.message = %q, want conflict message", result.Message)
+	}
+}
+
+func TestDeclareOnlyInstallCommandWritesHumanSuccessMessage(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stdout bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"install", "file:" + repoRoot, "--artifact", "base-readme", "--declare-only"},
+		&stdout,
+		&bytes.Buffer{},
+	)
+	if code != int(app.ExitSuccess) {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "declared artifact base-readme from local-example-source" {
+		t.Fatalf("stdout = %q, want declare-only message", got)
+	}
+}
+
+func TestDeclareOnlyInstallCommandJSONIncludesChange(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stdout bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"--output", "json", "install", "file:" + repoRoot, "--artifact", "base-readme", "--declare-only"},
+		&stdout,
+		&bytes.Buffer{},
+	)
+	if code != int(app.ExitSuccess) {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+
+	var got struct {
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal(stdout) error = %v", err)
+	}
+	if got.Message != "declare-only succeeded" {
+		t.Fatalf("message = %q, want declare-only succeeded", got.Message)
+	}
+	if got.Details["change"] != "declared" {
+		t.Fatalf("details.change = %#v, want declared", got.Details["change"])
+	}
+}
+
+func TestDeclareOnlyInstallCommandWritesNoOpHumanMessage(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+	writeTestFile(t, filepath.Join(repoRoot, "talby-artifacts.yaml"), ""+
+		"schema_version: 1\n"+
+		"declarations:\n"+
+		"  - source:\n"+
+		"      type: file\n"+
+		"      name: local-example-source\n"+
+		"    target:\n"+
+		"      scope: artifact\n"+
+		"      artifact: base-readme\n"+
+		"    input:\n"+
+		"      locator: "+repoRoot+"\n")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stdout bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"install", "file:" + repoRoot, "--artifact", "base-readme", "--declare-only"},
+		&stdout,
+		&bytes.Buffer{},
+	)
+	if code != int(app.ExitSuccess) {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "artifact base-readme from local-example-source is already declared" {
+		t.Fatalf("stdout = %q, want noop message", got)
+	}
+}
+
+func TestDeclareOnlyInstallCommandWritesManifestInCurrentWorkingDirectory(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := t.TempDir()
+	writeInstallFixture(t, sourceRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme", "--declare-only"},
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	)
+	if code != int(app.ExitSuccess) {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoRoot, repositorystate.ManifestFileName)); err != nil {
+		t.Fatalf("repo root manifest stat error = %v, want nil", err)
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, repositorystate.ManifestFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source root manifest state error = %v, want not exist", err)
+	}
+}
+
+func TestDeclareOnlyInstallCommandRejectsMissingSource(t *testing.T) {
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"install", "--declare-only"},
+		&bytes.Buffer{},
+		&stderr,
+	)
+	if code != int(app.ExitOperationalOrValidationError) {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if got := strings.TrimSpace(stderr.String()); got != "declare-only install requires an explicit <source>" {
+		t.Fatalf("stderr = %q, want missing source message", got)
 	}
 }
 

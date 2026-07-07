@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/talby/talby-bootstrap/internal/app"
 	installsvc "github.com/talby/talby-bootstrap/internal/install"
+	"github.com/talby/talby-bootstrap/internal/repositorystate"
 	"github.com/talby/talby-bootstrap/internal/source"
 	sourcefile "github.com/talby/talby-bootstrap/internal/source/file"
 )
@@ -28,9 +30,13 @@ type artifactDescriptorJSON struct {
 
 func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra.Command {
 	var artifact string
-	service := installsvc.NewService(source.NewStaticRegistry(map[string]source.Source{
-		"file": sourcefile.New(),
-	}))
+	var declareOnly bool
+	service := installsvc.NewService(
+		source.NewStaticRegistry(map[string]source.Source{
+			"file": sourcefile.New(),
+		}),
+		repositorystate.NewStore(),
+	)
 
 	cmd := &cobra.Command{
 		Use:     "install [<source>]",
@@ -39,6 +45,9 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
+				if declareOnly {
+					return fmt.Errorf("declare-only install requires an explicit <source>")
+				}
 				result := app.Success("sync not implemented")
 				if opts.output == outputJSON {
 					return json.NewEncoder(stdout).Encode(result)
@@ -51,21 +60,43 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 			if err != nil {
 				return err
 			}
+			root, err := os.Getwd()
+			if err != nil {
+				return err
+			}
 			result, err := service.Install(ctx, installsvc.Request{
-				Source:   ref,
-				Artifact: artifact,
+				Root:        root,
+				Source:      ref,
+				Artifact:    artifact,
+				DeclareOnly: declareOnly,
 			})
 			if err != nil {
 				return err
 			}
 
 			if opts.output == outputJSON {
-				envelope := app.Success("install succeeded")
+				message := "install succeeded"
+				if declareOnly {
+					message = "declare-only succeeded"
+				}
+				envelope := app.Success(message)
 				envelope.Details = map[string]any{
 					"source":   mapSourceIdentity(result.Source),
 					"artifact": mapArtifactDescriptor(result.Artifact),
 				}
+				if declareOnly {
+					envelope.Details["change"] = result.Change
+				}
 				return json.NewEncoder(stdout).Encode(envelope)
+			}
+
+			if declareOnly {
+				if result.Change == installsvc.ChangeNoOp {
+					_, err = fmt.Fprintf(stdout, "artifact %s from %s is already declared\n", result.Artifact.Name, result.Source.Name)
+					return err
+				}
+				_, err = fmt.Fprintf(stdout, "declared artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
+				return err
 			}
 
 			_, err = fmt.Fprintf(stdout, "selected artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
@@ -74,6 +105,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 	}
 
 	cmd.Flags().StringVar(&artifact, "artifact", "", "artifact to install")
+	cmd.Flags().BoolVar(&declareOnly, "declare-only", false, "declare artifact intent without materializing files")
 	return cmd
 }
 
