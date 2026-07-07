@@ -235,3 +235,4 @@ This allows the same example library to support human review and machine verific
 - Add a root `testdata/examples/README.md` that explains the library once the first examples exist.
 - Decide later whether `example.yaml` needs fields for environment setup, runner-staged outside-root fixtures, trust configuration overlays, or multi-command sequences beyond simple argv lists.
 - Defer `logs`-focused examples until operation persistence behavior exists in code.
+- Treat the current library as intentionally install-centered until the next command family creates concrete pressure to extend the schema; see `docs/reviews/2026-07-07-example-library-scope-follow-up.md`.
