@@ -44,7 +44,7 @@ Every example includes:
 
 - `README.md` with a short human explanation;
 - `example.yaml` with structured metadata for test consumption;
-- `source/` with the published **Source** and any **Artifacts** used by the example;
+- `source/` with the published **Source** and any **Artifacts** used by the example. The published `talby-source.yaml` describes content only; acquisition semantics such as `file` or `git` belong in the represented command and consumer-side expected state, not in the source descriptor itself;
 - `consumer/` with the initial consumer repository state before the represented command runs;
 - `expected/` with the normative expected results for that example.
 
