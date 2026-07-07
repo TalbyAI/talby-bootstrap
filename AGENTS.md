@@ -2,9 +2,9 @@
 
 ## Project Structure & Module Organization
 
-This repository is currently documentation-first for the Talby Bootstrap CLI design. Top-level files such as `CONTEXT.md`, `ARCHITECTURE.md`, `MISSION.md`, `NOTES.md`, `RESOURCES.md`, and `UBIQUITOUS_LANGUAGE.md` hold the core product language and decisions. Architecture decisions live in `docs/adr/` and design specs live in `docs/superpowers/specs/`. Learning artifacts are under `learning-records/`, rendered references under `reference/`, and lessons under `lessons/`.
+This repository contains both Talby Bootstrap product documentation and the Go implementation of the `tbboot` CLI. Top-level files such as `CONTEXT.md`, `ARCHITECTURE.md`, and `UBIQUITOUS_LANGUAGE.md` hold core product language and decisions. Architecture decisions live in `docs/adr/`, design specs and plans live in `docs/superpowers/specs/` and `docs/superpowers/plans/`, and review and research artifacts live under `docs/reviews/` and `docs/research/`.
 
-Go implementation code lives in `main.go`, `cmd/tbboot/`, and `internal/`. Keep Cobra-specific parsing in `cmd/tbboot/`; command-independent behavior belongs under `internal/`.
+Go entrypoint code lives in `main.go`. CLI surface area lives in `cmd/tbboot/`. Reusable command-independent behavior belongs under `internal/`, grouped by domain such as `internal/install/`, `internal/source/`, and `internal/app/`.
 
 ## Build, Test, and Development Commands
 
@@ -29,9 +29,20 @@ ADR files use numbered names in `docs/adr/`, for example `0005-operation-output-
 
 Markdown linting is configured in `.markdownlint-cli2.yaml`; line length is intentionally disabled, and duplicate headings are allowed only across different sibling scopes.
 
+Go code should keep package boundaries shallow and explicit. Follow these conventions:
+
+- Keep `main.go` minimal: it should start the CLI and return the process exit code.
+- Keep `cmd/tbboot/` focused on Cobra wiring, argument parsing, flag handling, and rendering command output.
+- Put command-independent behavior in `internal/<domain>/` packages with small services and explicit `Request` and `Result` types.
+- Model extensibility behind interfaces and registries in `internal/` when behavior varies by type or backend. Prefer explicit lookup points over command-level branching.
+- Validate inputs early and return direct, user-readable errors that work for both human output and JSON output.
+- When adding machine-readable output, reuse the shared `internal/app.Result` envelope and keep success and error shapes consistent across commands.
+
 ## Testing Guidelines
 
 Run `just check` before submitting changes. For documentation-only changes, `just check-md` is enough. For Go changes, run `just check-go` at minimum.
+
+For CLI changes, test exit codes and stdout/stderr behavior, including JSON mode when applicable. For `internal/` packages, prefer table-free, focused tests that cover both unit seams with fakes and at least one real-path integration-style case when local file resolution or descriptor parsing is central to the behavior.
 
 ## Commit & Pull Request Guidelines
 
