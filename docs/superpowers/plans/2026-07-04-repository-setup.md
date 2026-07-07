@@ -6,7 +6,7 @@
 
 **Architecture:** Use Go with Cobra for the v1 command surface. Keep Cobra in `cmd/tbboot`, and route commands into small core packages under `internal/` so future install, upgrade, search, logs, and catalog operations do not depend on Cobra.
 
-**Tech Stack:** Go 1.26.4, Cobra, PowerShell, `just`, `pnpx markdownlint-cli2`.
+**Tech Stack:** Go 1.26.4, Cobra, PowerShell, `just`, `npx -y markdownlint-cli2`.
 
 ---
 

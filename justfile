@@ -7,11 +7,11 @@ help:
 
 # Checks markdown files for linting and formatting errors
 check-md:
-    @pnpx markdownlint-cli2 .
+    @npx -y markdownlint-cli2 .
 
 # Fixes markdown files for linting and formatting errors
 fix-md:
-    @pnpx markdownlint-cli2 --fix .
+    @npx -y markdownlint-cli2 --fix .
 
 # Checks Go packages
 check-go:
