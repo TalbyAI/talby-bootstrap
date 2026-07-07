@@ -1,0 +1,3 @@
+fragments:
+  - installed artifact base-readme
+  - source file:local-example-source

@@ -1,0 +1,1 @@
+installed 2 artifacts from source file:local-example-source

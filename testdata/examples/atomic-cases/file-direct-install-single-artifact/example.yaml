@@ -1,0 +1,25 @@
+schema_version: 1
+id: file-direct-install-single-artifact
+kind: atomic-case
+polarity: positive
+summary: Install one artifact from a file source with a minimal successful result.
+commands:
+  - argv:
+      - tbboot
+      - install
+      - file:local-example-source
+      - --artifact
+      - base-readme
+verification:
+  exit_code: exact
+  stdout_text: contains
+  stdout_json: absent
+  consumer_state: exact
+normative_outputs:
+  - expected/exit-code.txt
+  - expected/stdout-contains.yaml
+  - expected/consumer
+tags:
+  - install
+  - file-source
+  - single-artifact

@@ -1,0 +1,6 @@
+schema_version: 1
+source:
+  name: prompting-source
+artifacts:
+  - name: script-setup
+    path: artifacts/script-setup

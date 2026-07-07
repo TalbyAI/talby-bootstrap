@@ -1,0 +1,24 @@
+schema_version: 1
+id: non-interactive-prompt-required
+kind: atomic-case
+polarity: negative
+summary: Reject a flow that would require prompting when running non-interactively.
+commands:
+  - argv:
+      - tbboot
+      - install
+      - file:prompting-source
+      - --non-interactive
+verification:
+  exit_code: exact
+  stdout_text: contains
+  stdout_json: absent
+  consumer_state: exact
+normative_outputs:
+  - expected/exit-code.txt
+  - expected/stdout-contains.yaml
+  - expected/consumer
+tags:
+  - non-interactive
+  - prompt
+  - negative

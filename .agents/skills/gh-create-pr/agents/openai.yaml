@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Create PR"
+  short_description: "Draft and publish reviewed pull requests"
+  default_prompt: "Use $gh-create-pr to analyze the current branch, draft a pull request title and description for review, and publish it after explicit confirmation."
