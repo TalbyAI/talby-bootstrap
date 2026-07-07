@@ -44,9 +44,10 @@ Every example includes:
 
 - `README.md` with a short human explanation;
 - `example.yaml` with structured metadata for test consumption;
-- `source/` with the published **Source** and any **Artifacts** used by the example. The published `talby-source.yaml` describes content only; acquisition semantics such as `file` or `git` belong in the represented command and consumer-side expected state, not in the source descriptor itself;
 - `consumer/` with the initial consumer repository state before the represented command runs;
 - `expected/` with the normative expected results for that example.
+
+Examples include `source/` when the represented command needs staged published source content. The published `talby-source.yaml` describes content only; acquisition semantics such as `file` or `git` belong in the represented command and consumer-side expected state, not in the source descriptor itself. Negative examples that fail before acquisition may omit `source/`.
 
 ## Example metadata schema
 
@@ -64,7 +65,7 @@ commands:
   - argv:
       - tbboot
       - install
-      - file:local-example-source
+      - file:.tbboot-example/sources/local-example-source
       - --artifact
       - base-readme
 verification:
@@ -96,9 +97,39 @@ Field intent:
 
 This metadata is intentionally declarative. It tells a test harness what to inspect without embedding procedural logic into the example itself.
 
+## Runner staging contract
+
+The first shared runner should use one deterministic staging layout for every example:
+
+```text
+<temp-workspace>/
+  <consumer contents copied here>
+  .tbboot-example/
+    sources/
+      <contents of example source/ copied here when present>
+```
+
+The runner executes represented commands from the staged consumer root, not from inside the example fixture directory. This keeps the **Manifest**, **Lockfile**, and **Operation Root** semantics aligned with the accepted ADRs while still giving `file:` examples a stable in-repository locator.
+
+For v1, the runner should execute with stdin closed and without an interactive TTY. Examples that cover **JSON Output Envelope** behavior must request JSON explicitly in `commands[].argv`; examples that cover prompt-required failures should rely on the documented non-interactive contract rather than on an implicit interactive mode.
+
+Because `file:` sources are allowed by default only when they are inside the current **Operation Root**, examples that expect default `file:` approval should use locators under `.tbboot-example/sources/`. Examples that need to prove outside-root denial should say so explicitly in their `README.md` and use a locator that the runner stages outside the consumer root for that example.
+
+## Verification mode contract
+
+The `verification` object should use a small fixed vocabulary rather than free-form meanings. The first version should allow:
+
+- `exit_code`: `exact` or `class`
+- `stdout_text`: `exact`, `contains`, or `absent`
+- `stdout_json`: `exact`, `contains`, or `absent`
+- `consumer_state`: `exact` or `absent`
+- `logs`: `exact`, `contains`, or `absent` when the example covers recorded operations
+
+`exact` means the referenced file or directory is the full contract for that surface. `contains` means the expected file declares required fragments only. `absent` means the surface is intentionally out of scope for that example. `class` for exit codes is reserved for cases that care about the accepted v1 exit-code class and not the exact integer.
+
 ## Expected result conventions
 
-Each example must include `expected/exit-code.txt`. Other files under `expected/` are selected based on the contract the example is intended to fix.
+Each example must include either `expected/exit-code.txt` or `expected/exit-code-class.txt`, depending on whether the contract fixes the exact exit code or only the accepted v1 exit-code class. Other files under `expected/` are selected based on the contract the example is intended to fix.
 
 Recommended conventions:
 
@@ -108,14 +139,17 @@ Recommended conventions:
 - `expected/stdout-json-contains.yaml`: required JSON fields or fragments when the example fixes only a subset of the JSON contract.
 - `expected/consumer/`: final consumer repository state when the example is supposed to mutate consumer files.
 - `expected/logs/`: expected operation log artifacts only for examples that explicitly cover the **Logs Command** or recorded operation persistence.
+- `expected/exit-code-class.txt`: expected exit-code class when the example verifies the v1 class only instead of the exact integer.
 
 The verification mode in `example.yaml` must match the files present under `expected/`.
+
+When JSON output is normative, the expected envelope should follow ADR-0005 and include `code`, `message`, `details`, `warnings`, and any required operation metadata for that example. Examples that only fix one JSON fragment should prefer `stdout_json: contains` to avoid freezing unrelated fields too early.
 
 For `contains` verification, expected fragments should be stored as explicit YAML lists rather than plain text files with ad hoc separators. Recommended shape:
 
 ```yaml
 fragments:
-  - source file:local-example-source is not approved
+  - source file:.tbboot-example/sources/local-example-source is not approved
   - add the source to the Manifest trust policy to continue
 ```
 
@@ -183,7 +217,7 @@ The intended future flow is:
 1. A shared Go test runner enumerates example directories under `testdata/examples/`.
 2. The runner executes each example as its own subtest, using the example `id` as the subtest name.
 3. The runner reads `example.yaml`.
-4. The runner stages the `source/` and `consumer/` trees in a temporary workspace.
+4. The runner stages the `consumer/` tree and the example `source/` tree when present in a temporary workspace.
 5. The runner executes the represented `tbboot` argv when executable behavior exists.
 6. The runner verifies outputs according to the declared verification modes and normative expected files.
 
@@ -199,5 +233,5 @@ This allows the same example library to support human review and machine verific
 ## Deferred work
 
 - Add a root `testdata/examples/README.md` that explains the library once the first examples exist.
-- Decide later whether `example.yaml` needs fields for environment setup, trust configuration overlays, or multi-command sequences beyond simple argv lists.
+- Decide later whether `example.yaml` needs fields for environment setup, runner-staged outside-root fixtures, trust configuration overlays, or multi-command sequences beyond simple argv lists.
 - Defer `logs`-focused examples until operation persistence behavior exists in code.
