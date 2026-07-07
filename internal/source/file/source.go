@@ -2,6 +2,8 @@ package file
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,13 +71,14 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 
 	resolved := source.ResolvedSource{
 		Identity: source.Identity{
-			Type:    "file",
-			Name:    descriptor.Source.Name,
-			Version: "local-snapshot-001",
+			Type: "file",
+			Name: descriptor.Source.Name,
 		},
 		SourcePath: req.Ref.Locator,
 		Artifacts:  make([]source.ArtifactDescriptor, 0, len(descriptor.Artifacts)),
 	}
+	snapshot := sha256.New()
+	snapshot.Write(sourceBytes)
 
 	for _, artifactRef := range descriptor.Artifacts {
 		artifactDir, err := resolveArtifactDir(req.Ref.Locator, artifactRef.Path)
@@ -96,6 +99,11 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 		if err := validateArtifactDescriptor(artifactRef, descriptor); err != nil {
 			return source.ResolvedSource{}, fmt.Errorf("parse %s: %w", artifactPath, err)
 		}
+		snapshot.Write([]byte(artifactRef.Name))
+		snapshot.Write([]byte{0})
+		snapshot.Write([]byte(artifactRef.Path))
+		snapshot.Write([]byte{0})
+		snapshot.Write(artifactBytes)
 
 		resolved.Artifacts = append(resolved.Artifacts, source.ArtifactDescriptor{
 			Name:    artifactRef.Name,
@@ -103,6 +111,7 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 			Path:    artifactRef.Path,
 		})
 	}
+	resolved.Identity.Version = "local-snapshot-" + hex.EncodeToString(snapshot.Sum(nil))
 
 	return resolved, nil
 }

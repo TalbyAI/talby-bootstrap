@@ -248,8 +248,8 @@ func TestInstallWithRealFileSource(t *testing.T) {
 	if got.Source.Name != "local-example-source" {
 		t.Fatalf("Source.Name = %q, want local-example-source", got.Source.Name)
 	}
-	if got.Source.Version != "local-snapshot-001" {
-		t.Fatalf("Source.Version = %q, want local-snapshot-001", got.Source.Version)
+	if !strings.HasPrefix(got.Source.Version, "local-snapshot-") {
+		t.Fatalf("Source.Version = %q, want local-snapshot-*", got.Source.Version)
 	}
 	if got.Artifact.Name != "base-readme" {
 		t.Fatalf("Artifact.Name = %q, want base-readme", got.Artifact.Name)

@@ -11,167 +11,105 @@
 
 ## Validation
 
-- `just check-go`
+- `go test ./internal/source/file -run 'TestResolve(LoadsSourceIdentityAndArtifacts|ChangesSnapshotVersionWhenResolvedContentChanges)' -v`
+- `go test ./...`
 
 ## Standards findings
 
-### 1. `install` no longer preserves the documented bare-command `Sync` behavior
-
-- Severity: high
-- Files:
-  - [cmd/tbboot/install.go](/workspaces/talby-bootstrap/cmd/tbboot/install.go:43)
-  - [docs/adr/0001-cli-surfaces-and-command-model.md](/workspaces/talby-bootstrap/docs/adr/0001-cli-surfaces-and-command-model.md:20)
-  - [CONTEXT.md](/workspaces/talby-bootstrap/CONTEXT.md:160)
-- Issue:
-  - The command now uses `cobra.ExactArgs(1)`, which rejects bare `tbboot install`.
-  - Repo language and ADRs define bare `install` as the user-facing entrypoint for **Sync**.
-- Why it matters:
-  - This is a behavioral regression against the documented CLI contract, not just a wording mismatch.
-- Decision:
-  - Applicable.
-  - Merge-blocking.
-- Required action:
-  - Rework the `install` command shape so bare `tbboot install` is accepted again.
-  - Route the zero-argument case to the documented **Sync** behavior instead of failing argument validation.
-  - Update CLI tests to cover both bare `install` and explicit `install <source-ref>` so this contract cannot regress again.
-
-### 2. JSON success output does not use the documented JSON envelope
-
-- Severity: high
-- Files:
-  - [cmd/tbboot/install.go](/workspaces/talby-bootstrap/cmd/tbboot/install.go:57)
-  - [docs/adr/0005-operation-output-logs-and-exit-codes.md](/workspaces/talby-bootstrap/docs/adr/0005-operation-output-logs-and-exit-codes.md:15)
-  - [CONTEXT.md](/workspaces/talby-bootstrap/CONTEXT.md:135)
-- Issue:
-  - Success output encodes only `source` and `artifact`.
-  - The repo contract defines one canonical **JSON Output Envelope** for machine-readable CLI output.
-- Why it matters:
-  - This breaks consistency for automation and diverges from the stated operation-result contract.
-- Decision:
-  - Applicable.
-  - Merge-blocking.
-- Required action:
-  - Replace the ad hoc success JSON payload with the canonical **JSON Output Envelope**.
-  - Put the install-specific payload under the envelope `details` field rather than emitting top-level `source` and `artifact` fields directly.
-  - Update CLI JSON tests to assert the envelope shape on success, not only on error.
-
-### 3. New design text uses non-canonical domain vocabulary
-
-- Severity: medium
-- Files:
-  - [docs/superpowers/specs/2026-07-07-install-core-design.md](/workspaces/talby-bootstrap/docs/superpowers/specs/2026-07-07-install-core-design.md:123)
-  - [docs/superpowers/specs/2026-07-07-install-core-design.md](/workspaces/talby-bootstrap/docs/superpowers/specs/2026-07-07-install-core-design.md:129)
-  - [UBIQUITOUS_LANGUAGE.md](/workspaces/talby-bootstrap/UBIQUITOUS_LANGUAGE.md:20)
-  - [CONTEXT.md](/workspaces/talby-bootstrap/CONTEXT.md:35)
-- Issue:
-  - The design says “source kinds”.
-  - Repo terminology explicitly prefers **Source Type** and avoids “source kind”.
-- Why it matters:
-  - The repo is documentation-first; terminology drift weakens the design as a source of truth.
-- Decision:
-  - Applicable.
-  - Not merge-blocking for the current branch.
-- Required action:
-  - Replace `source kind` / `source kinds` with **Source Type** in the install-core design doc.
-  - Re-scan nearby wording for any other terminology that drifts from `CONTEXT.md` and `UBIQUITOUS_LANGUAGE.md`.
-
-### 4. The new plan heading does not follow the repo heading style
+### 1. Human success output is still ad hoc follow-up work
 
 - Severity: low
 - Files:
-  - [docs/superpowers/plans/2026-07-07-install-core.md](/workspaces/talby-bootstrap/docs/superpowers/plans/2026-07-07-install-core.md:1)
-  - [AGENTS.md](/workspaces/talby-bootstrap/AGENTS.md:22)
+  - [cmd/tbboot/install.go](/workspaces/talby-bootstrap/cmd/tbboot/install.go:76)
+  - [CONTEXT.md](/workspaces/talby-bootstrap/CONTEXT.md:167)
+  - [docs/adr/0005-operation-output-logs-and-exit-codes.md](/workspaces/talby-bootstrap/docs/adr/0005-operation-output-logs-and-exit-codes.md:13)
 - Issue:
-  - The heading is title case: `# Install Core Implementation Plan`.
-  - Repo guidance requires sentence-case Markdown headings.
+  - The current human success path prints `selected artifact %s from %s`.
+  - The repo’s long-term contract expects a stable **Operation Summary** shape for install and sync operations.
 - Why it matters:
-  - Minor, but it is a direct style miss in a newly added primary document.
+  - This is output-contract drift, but under the current branch policy it is not evident current-slice breakage.
 - Decision:
   - Applicable.
   - Not merge-blocking for the current branch.
-- Required action:
-  - Rename the top heading in the plan to sentence case.
-  - Keep the rest of the plan content unchanged unless another style mismatch is found nearby.
+- Follow-up note:
+  - Revisit the human summary once install starts reporting real reconciliation outcomes instead of only artifact selection.
 
-### 5. Test fixture file helpers are duplicated across packages
+### 2. Dead JSON mapping code remains in `cmd/tbboot/install.go`
 
 - Severity: low
 - Files:
-  - [cmd/tbboot/root_test.go](/workspaces/talby-bootstrap/cmd/tbboot/root_test.go:147)
+  - [cmd/tbboot/install.go](/workspaces/talby-bootstrap/cmd/tbboot/install.go:17)
+  - [cmd/tbboot/install.go](/workspaces/talby-bootstrap/cmd/tbboot/install.go:85)
+- Issue:
+  - `installResultJSON` and `mapInstallResult` are no longer used after the command switched to the canonical envelope shape under `details`.
+- Why it matters:
+  - This is cleanup debt only. It does not change current behavior.
+- Decision:
+  - Applicable.
+  - Not merge-blocking for the current branch.
+- Follow-up note:
+  - Remove the dead mapping layer when the next output-focused slice touches `cmd/tbboot/install.go`.
+
+### 3. Test fixture file helpers are duplicated across packages
+
+- Severity: low
+- Files:
+  - [cmd/tbboot/root_test.go](/workspaces/talby-bootstrap/cmd/tbboot/root_test.go:156)
   - [internal/install/service_test.go](/workspaces/talby-bootstrap/internal/install/service_test.go:264)
-  - [internal/source/file/source_test.go](/workspaces/talby-bootstrap/internal/source/file/source_test.go:188)
+  - [internal/source/file/source_test.go](/workspaces/talby-bootstrap/internal/source/file/source_test.go:216)
 - Issue:
   - The same `MkdirAll` + `WriteFile` helper pattern appears in three test files.
 - Why it matters:
-  - This is a judgment-call maintainability smell, not a contract violation. It is worth watching if more install-fixture tests are added.
+  - This is a judgment-call maintainability smell. It does not change current install-core behavior.
 - Decision:
   - Applicable.
   - Not merge-blocking for the current branch.
-- Required action:
-  - No immediate refactor is required for this branch.
-  - If install-related fixture tests continue to grow, consolidate the helper into a small shared test utility rather than copying a fourth variant.
+- Follow-up note:
+  - Consolidate the helper only if install-fixture tests continue to expand.
 
 ## Spec findings
 
-### 1. Source capabilities are modeled but not enforced by the install core
+### 1. `file` source version was a constant placeholder instead of a local snapshot hash
 
 - Severity: high
 - Files:
-  - [internal/install/service.go](/workspaces/talby-bootstrap/internal/install/service.go:36)
-  - [internal/source/file/source.go](/workspaces/talby-bootstrap/internal/source/file/source.go:46)
-  - [internal/install/service_test.go](/workspaces/talby-bootstrap/internal/install/service_test.go:49)
-  - [docs/superpowers/specs/2026-07-07-install-core-design.md](/workspaces/talby-bootstrap/docs/superpowers/specs/2026-07-07-install-core-design.md:129)
+  - [internal/source/file/source.go](/workspaces/talby-bootstrap/internal/source/file/source.go:110)
+  - [internal/source/file/source_test.go](/workspaces/talby-bootstrap/internal/source/file/source_test.go:47)
+  - [docs/adr/0002-source-resolution-versioning-and-locking.md](/workspaces/talby-bootstrap/docs/adr/0002-source-resolution-versioning-and-locking.md:22)
 - Issue:
-  - The design says the core should reason about source capabilities rather than source-specific assumptions.
-  - The implementation defines `Capabilities()` but `Service.Install` never reads it.
-  - The tests currently accept `source.Ref{Version: "v1.2.3"}` for a `file` source even though that source reports `SupportsVersions: false`.
+  - The branch originally returned `local-snapshot-001` for every resolved `file` source.
+  - ADR-0002 says `file` should record a local snapshot hash as the resolved **Source Version**.
 - Why it matters:
-  - The current boundary looks future-ready but does not yet enforce one of the forward-compatibility rules it was introduced to support.
+  - A constant placeholder is incorrect current-slice behavior, not just deferred future work.
 - Decision:
-  - Not applicable for this merge gate.
-  - No action required in the current branch.
-- Rationale:
-  - The design requires the capability model to exist, but the same design also says the first iteration does not need to exercise every capability.
-  - Enforcing `SupportsVersions` for `source.Ref.Version` is a plausible next step, but this branch is not incorrect at its current boundary solely because that enforcement is deferred.
-- Follow-up note:
-  - If a later slice introduces `--source-version` end-to-end behavior, that slice should decide whether unsupported source types are rejected by the install core, by CLI normalization, or by both.
+  - Fixed in this branch.
+  - Verified with a regression test that different resolved content produces different `local-snapshot-*` versions.
 
-### 2. The branch contains scope creep outside the install-core plan
+### 2. Install result still drops source-resolution metadata needed by later slices
 
 - Severity: medium
 - Files:
-  - [docs/research/2026-07-07-ponytail-codex-install.md](/workspaces/talby-bootstrap/docs/research/2026-07-07-ponytail-codex-install.md:1)
-  - [docs/research/2026-07-07-superpowers-codex-install.md](/workspaces/talby-bootstrap/docs/research/2026-07-07-superpowers-codex-install.md:1)
-  - [docs/research/2026-07-07-superpowers-ponytail-compatibility.md](/workspaces/talby-bootstrap/docs/research/2026-07-07-superpowers-ponytail-compatibility.md:1)
-  - [docs/superpowers/plans/2026-07-07-install-core.md](/workspaces/talby-bootstrap/docs/superpowers/plans/2026-07-07-install-core.md:19)
+  - [internal/install/service.go](/workspaces/talby-bootstrap/internal/install/service.go:15)
+  - [internal/source/model.go](/workspaces/talby-bootstrap/internal/source/model.go:34)
+  - [docs/superpowers/plans/2026-07-07-install-core.md](/workspaces/talby-bootstrap/docs/superpowers/plans/2026-07-07-install-core.md:32)
 - Issue:
-  - The plan scopes this slice to install-core implementation files plus the install-core plan/spec updates.
-  - The branch also adds Codex plugin installation and compatibility research unrelated to the install-core implementation slice.
+  - `InstallResult` currently returns `source.Identity` plus the selected artifact, but drops extra resolved-source metadata such as `SourcePath`.
 - Why it matters:
-  - The extra docs are not inherently wrong, but they make the branch less focused as an implementation of the cited plan and design.
+  - This leaves later manifest/lockfile/materialization slices with less data than the plan expected, but it does not break the behavior implemented in this branch.
 - Decision:
   - Applicable.
   - Not merge-blocking for the current branch.
-- Required action:
-  - No code reimplementation is needed.
-  - Decide during branch cleanup whether to keep the research docs here, move them to a follow-up branch, or explicitly widen the documented branch scope.
-  - If the goal is a narrowly scoped merge, removing or splitting those docs would make the branch easier to review, but correctness of the install core does not depend on that split.
+- Follow-up note:
+  - Expand `install.Result` only when the next slice is ready to consume the additional source-resolution fields.
 
 ## Summary
 
-- Standards findings: `5`
+- Standards findings: `3`
 - Spec findings: `2`
-- Merge-blocking items to fix now: `2`
-  - bare `install` must remain the user-facing entrypoint for **Sync**
-  - success JSON output must use the canonical **JSON Output Envelope**
-- Applicable but not merge-blocking items: `4`
-  - terminology drift in the install-core design doc
-  - sentence-case heading in the install-core plan
+- Fixed in this branch: `1`
+  - `file` source now returns a content-derived `local-snapshot-*` hash instead of a constant placeholder version
+- Documented follow-ups left intentionally for later: `4`
+  - ad hoc human success summary
+  - dead JSON mapping code in `cmd/tbboot/install.go`
   - duplicated fixture helpers across tests
-  - extra research docs that widen the branch scope
-- Not applicable for this merge gate: `1`
-  - capability enforcement for version-related source behavior
-- Highest-impact standards issue:
-  - bare `install` no longer maps to documented **Sync** behavior
-- Highest-impact spec issue:
-  - the install core does not yet use source capabilities to validate version-related requests
+  - `install.Result` dropping extra source-resolution metadata

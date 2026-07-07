@@ -27,8 +27,8 @@ func TestResolveLoadsSourceIdentityAndArtifacts(t *testing.T) {
 	if resolved.Identity.Name != "local-example-source" {
 		t.Fatalf("Identity.Name = %q, want local-example-source", resolved.Identity.Name)
 	}
-	if resolved.Identity.Version != "local-snapshot-001" {
-		t.Fatalf("Identity.Version = %q, want local-snapshot-001", resolved.Identity.Version)
+	if !strings.HasPrefix(resolved.Identity.Version, "local-snapshot-") {
+		t.Fatalf("Identity.Version = %q, want local-snapshot-*", resolved.Identity.Version)
 	}
 	if resolved.SourcePath != root {
 		t.Fatalf("SourcePath = %q, want %q", resolved.SourcePath, root)
@@ -41,6 +41,34 @@ func TestResolveLoadsSourceIdentityAndArtifacts(t *testing.T) {
 	}
 	if resolved.Artifacts[0].Path != "artifacts/base-readme" {
 		t.Fatalf("Artifacts[0].Path = %q, want artifacts/base-readme", resolved.Artifacts[0].Path)
+	}
+}
+
+func TestResolveChangesSnapshotVersionWhenResolvedContentChanges(t *testing.T) {
+	firstRoot := t.TempDir()
+	writeFile(t, filepath.Join(firstRoot, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
+	writeFile(t, filepath.Join(firstRoot, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\n")
+
+	secondRoot := t.TempDir()
+	writeFile(t, filepath.Join(secondRoot, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
+	writeFile(t, filepath.Join(secondRoot, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 2.0.0\n")
+
+	firstResolved, err := New().Resolve(context.Background(), source.ResolveRequest{
+		Ref: source.Ref{Type: "file", Locator: firstRoot},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() first error = %v", err)
+	}
+
+	secondResolved, err := New().Resolve(context.Background(), source.ResolveRequest{
+		Ref: source.Ref{Type: "file", Locator: secondRoot},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() second error = %v", err)
+	}
+
+	if firstResolved.Identity.Version == secondResolved.Identity.Version {
+		t.Fatalf("Identity.Version = %q for both roots, want different snapshot hashes", firstResolved.Identity.Version)
 	}
 }
 
