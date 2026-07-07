@@ -25,15 +25,19 @@ The canonical location where an **Artifact Descriptor** is stored. It lives in t
 _Avoid_: Repository root, inferred location
 
 **Source**:
-A concrete origin that can resolve and deliver one or more **Artifacts**. A source may be a local private folder, a repository on GitHub or another code host, or another retrievable content location that defines artifacts or artifact definitions.
+A published origin that defines and can deliver one or more **Artifacts** through its **Source Descriptor** and artifact contents. A **Source** describes published content, not the consumer's acquisition semantics.
 _Avoid_: Catalog
 
+**Acquisition Channel**:
+The consumer-side mechanism used to obtain a **Source** for resolution, trust evaluation, and locking. In v1, the supported acquisition channels are `file` and `git`.
+_Avoid_: Source kind, published transport, inferred protocol
+
 **Source Type**:
-The explicit classification of a **Source** that determines how the CLI connects to it and resolves artifacts from it. In v1, only `file` and `git` are supported source types for approval and resolution.
-_Avoid_: Inferred protocol, source guess
+The explicit classification of an **Acquisition Channel** used in consumer-facing references, **Manifest** entries, trust policy checks, and **Lockfile** resolution records. In v1, only `file` and `git` are supported source types for approval and resolution.
+_Avoid_: Published source kind, inferred protocol, source guess
 
 **Source Descriptor**:
-The explicit definition published by a **Source** to declare which artifacts it provides and the metadata needed to resolve them.
+The explicit definition published by a **Source** to declare which artifacts it provides and source-local publication metadata. Acquisition semantics such as **Source Type**, trust handling, and consumer resolution behavior do not live in the published descriptor; they live in the consumer-facing reference, **Manifest**, and **Lockfile**.
 _Avoid_: Folder inference, implicit structure
 
 **Descriptor Schema Version**:
@@ -41,8 +45,12 @@ The explicit schema version declared by a **Source Descriptor** so the CLI can p
 _Avoid_: Implicit format version, source type version
 
 **Source Version**:
-The version or snapshot identifier that represents a resolved state of a **Source** as a whole. When direct install omits an explicit source version, `git` resolution defaults to the latest stable published source version, while `file` resolution records a local snapshot hash in the **Lockfile**. Once resolved, later sync operations keep that resolved source version until the user explicitly asks to move to a newer one.
+The version or snapshot identifier that represents a resolved state of a **Source** as obtained through a specific **Acquisition Channel**. When direct install omits an explicit source version, `git` resolution defaults to the latest stable published source version, while `file` resolution records a local snapshot hash in the **Lockfile**. Once resolved, later sync operations keep that resolved source version until the user explicitly asks to move to a newer one.
 _Avoid_: Artifact version, floating state
+
+**Source Identity**:
+The stable consumer-side identity used to distinguish one acquired source from another for declaration, trust, and locking. In v1, **Source Identity** includes **Source Type** plus source name or locator, so identical published content acquired through different channels is still treated as different sources.
+_Avoid_: Source Descriptor alone, content hash alone, artifact path
 
 **Source Descriptor Filename**:
 The canonical filename used by a **Source** to publish its **Source Descriptor**. The initial filename is `talby-source.yaml`.
@@ -57,7 +65,7 @@ A resolvable location or identifier used to register a **Catalog** before it has
 _Avoid_: Local catalog name, catalog source
 
 **Direct Install Reference**:
-The explicit typed source reference a user can provide to install an **Artifact** directly from its **Source** without relying on any **Catalog**. Its canonical form identifies the source as `{source-type}:{source-name}`; the artifact is selected separately, and any direct-install version pin applies to the **Source Version** rather than being embedded in the artifact selector. Ambiguity is evaluated only after normalization within the declared **Source Type**.
+The explicit typed source reference a user can provide to install an **Artifact** directly from its **Source** without relying on any **Catalog**. Its canonical form identifies the source as `{source-type}:{source-name}` and therefore carries **Source Identity** through the declared **Acquisition Channel**; the artifact is selected separately, and any direct-install version pin applies to the **Source Version** rather than being embedded in the artifact selector. Ambiguity is evaluated only after normalization within the declared **Source Type**.
 _Avoid_: Catalog entry, inferred lookup
 
 **Catalog Install Reference**:
@@ -65,7 +73,7 @@ The catalog-qualified install reference a user can provide when resolving throug
 _Avoid_: Direct source reference, implicit global lookup
 
 **Manifest**:
-A versioned file in a consumer repository that declares which **Artifacts** should be installed there, including enough source identity to re-resolve them stably even if the lockfile must be regenerated. The stable source identity is normative; any preserved original user-facing reference is optional metadata only.
+A versioned file in a consumer repository that declares which **Artifacts** should be installed there, including enough **Source Identity** to re-resolve them stably even if the lockfile must be regenerated. The stable source identity is normative; any preserved original user-facing reference is optional metadata only.
 _Avoid_: Lockfile, machine config
 
 **Manifest Format**:
@@ -105,7 +113,7 @@ A source-level installation mode where the installed set of artifacts is limited
 _Avoid_: Floating source, live source
 
 **Trust Policy**:
-The versioned security policy that controls which artifacts, materialization step types, approved sources, or age constraints are allowed for a consumer repository. The manifest defines the allowlist of approved sources; approval of a source does not automatically approve every risky step type it can deliver. `file:` sources are allowed by default only when they point inside the current **Operation Root**; `git:` sources always require explicit approval in the manifest. Source types that can prove publication time may also be constrained by a minimum age rule. Local machine settings may harden this policy, but should not silently weaken it.
+The versioned security policy that controls which artifacts, materialization step types, approved source identities, or age constraints are allowed for a consumer repository. The manifest defines the allowlist of approved **Source Identity** values; approval of one acquired source does not automatically approve every other channel that could publish similar content, nor every risky step type it can deliver. `file:` sources are allowed by default only when they point inside the current **Operation Root**; `git:` sources always require explicit approval in the manifest. Source types that can prove publication time may also be constrained by a minimum age rule. Local machine settings may harden this policy, but should not silently weaken it.
 _Avoid_: Machine default, ad hoc flag
 
 **Minimum Age Rule**:
@@ -275,12 +283,14 @@ _Avoid_: Expected update, normal sync
 - A **Materialization Step** has exactly one **Materialization Step Type**
 - A **Materialization Step Type** may require explicit enablement before an artifact containing that step can be installed
 - A **Source** provides one or more **Artifacts**
-- A **Source** has exactly one **Source Type**
+- A **Source** does not declare its **Source Type** in the published descriptor
+- An **Acquisition Channel** has exactly one **Source Type**
 - A **Source** publishes exactly one **Source Descriptor**
 - A **Source Descriptor** has exactly one canonical **Source Descriptor Filename**
 - A **Source Descriptor** lives at the source repository root
 - A **Source Descriptor** declares exactly one **Descriptor Schema Version**
 - A **Source** may publish one or more **Source Versions**
+- A **Source Identity** includes **Source Type** plus the consumer-side source locator
 - An **Artifact Name** is unique only within its **Source**
 - The stable identity of an **Artifact** is the combination of its **Source** and **Artifact Name**
 - An **Artifact Descriptor** includes the artifact version and descriptive metadata
@@ -294,11 +304,11 @@ _Avoid_: Expected update, normal sync
 - A **Manifest** has exactly one canonical **Manifest Filename**
 - A **Manifest** lives at the consumer repository root
 - A **Manifest** declares one or more desired **Artifacts**
-- A **Manifest** may also declare an entire **Source**, which implies all of its **Artifacts**
+- A **Manifest** may also declare an entire **Source Identity**, which implies all of its resolved **Artifacts**
 - A whole-**Source** install defaults to **Pinned Source** behavior
 - **Floating Source** behavior must be enabled explicitly
 - A **Manifest** defines the base **Trust Policy** for its consumer repository
-- A **Trust Policy** defines an explicit allowlist of approved **Sources**
+- A **Trust Policy** defines an explicit allowlist of approved **Source Identity** values
 - A **Manifest** may define an **Overwrite Policy**
 - Local machine settings may harden the **Trust Policy** or require more confirmation
 - A **Manifest** expresses installation intent, not exact resolved versions
@@ -421,7 +431,7 @@ _Avoid_: Expected update, normal sync
 - temporal trust checks could be applied at the wrong level — resolved: **Minimum Age Rule** is validated against the exact **Resolution**
 - overwrite handling could be too blunt — resolved: use an **Overwrite Policy** that can consult Git state plus manifest and CLI overrides
 - planning and applying could be split unnecessarily — resolved: the **Install Command** is the primary user-facing command, and **Sync** remains the underlying reconciliation operation
-- source behavior could become implicit and fragile — resolved: every **Source** declares an explicit **Source Type**
+- source acquisition semantics could become implicit and fragile — resolved: every consumer-facing source reference declares an explicit **Source Type**, while the published **Source Descriptor** stays transport-agnostic
 - manifest format could expand too early — resolved: the initial canonical **Manifest Format** is YAML only
 - reproducibility could be undermined by local-only state — resolved: the **Lockfile** lives in and is versioned with the repository
 - source discovery could become ambiguous — resolved: each **Source** publishes an explicit **Source Descriptor**
