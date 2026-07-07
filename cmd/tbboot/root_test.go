@@ -31,54 +31,284 @@ func TestHelpIncludesV1CommandSurfaces(t *testing.T) {
 
 func TestInstallAlias(t *testing.T) {
 	root := t.TempDir()
-	writeInstallFixture(t, root)
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
 
 	var stdout bytes.Buffer
-	code := execute(context.Background(), []string{"i", "file:" + root, "--artifact", "base-readme"}, &stdout, &bytes.Buffer{})
+	code := execute(context.Background(), []string{"i", "file:" + sourceRoot, "--artifact", "base-readme"}, &stdout, &bytes.Buffer{})
 	if code != int(app.ExitSuccess) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "selected artifact base-readme from local-example-source" {
-		t.Fatalf("stdout = %q, want selected artifact message", got)
+	if got := strings.TrimSpace(stdout.String()); got != "installed artifact base-readme from local-example-source" {
+		t.Fatalf("stdout = %q, want installed artifact message", got)
 	}
 }
 
 func TestInstallCommandWithoutSourceRunsSyncShape(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	if code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	); code != int(app.ExitSuccess) {
+		t.Fatalf("first install exit code = %d, want 0", code)
+	}
+
 	var stdout bytes.Buffer
 	code := execute(context.Background(), []string{"install"}, &stdout, &bytes.Buffer{})
 	if code != int(app.ExitSuccess) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "sync not implemented" {
-		t.Fatalf("stdout = %q, want sync placeholder message", got)
+	if got := strings.TrimSpace(stdout.String()); got != "sync: no changes" {
+		t.Fatalf("stdout = %q, want sync noop message", got)
+	}
+}
+
+func TestInstallCommandWithoutSourceStopsOnDrift(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	if code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	); code != int(app.ExitSuccess) {
+		t.Fatalf("first install exit code = %d, want 0", code)
+	}
+	writeTestFile(t, filepath.Join(repoRoot, "README.md"), "user edit\n")
+
+	var stderr bytes.Buffer
+	code := execute(context.Background(), []string{"install"}, &bytes.Buffer{}, &stderr)
+	if code != int(app.ExitUserActionConflict) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitUserActionConflict)
+	}
+	if got := strings.TrimSpace(stderr.String()); !strings.Contains(got, "has drifted") {
+		t.Fatalf("stderr = %q, want drift text", got)
+	}
+}
+
+func TestInstallCommandWithoutSourceStopsWhenSourceSnapshotChanges(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	if code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	); code != int(app.ExitSuccess) {
+		t.Fatalf("first install exit code = %d, want 0", code)
+	}
+	writeTestFile(t, filepath.Join(sourceRoot, "artifacts", "base-readme", "README.md"), "changed at source\n")
+
+	var stderr bytes.Buffer
+	code := execute(context.Background(), []string{"install"}, &bytes.Buffer{}, &stderr)
+	if code != int(app.ExitOperationalOrValidationError) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitOperationalOrValidationError)
+	}
+	if got := strings.TrimSpace(stderr.String()); !strings.Contains(got, "locked source version") {
+		t.Fatalf("stderr = %q, want locked source version text", got)
+	}
+}
+
+func TestInstallTrustDenialReturnsTrustOrPolicyExitCode(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := t.TempDir()
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&stderr,
+	)
+	if code != int(app.ExitTrustOrPolicyDenial) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitTrustOrPolicyDenial)
+	}
+	if got := strings.TrimSpace(stderr.String()); !strings.Contains(got, "outside the operation root") {
+		t.Fatalf("stderr = %q, want trust denial text", got)
+	}
+}
+
+func TestInstallTrustDenialReturnsTrustOrPolicyExitCodeAsJSON(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := t.TempDir()
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"--output", "json", "install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&stdout,
+		&stderr,
+	)
+	if code != int(app.ExitTrustOrPolicyDenial) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitTrustOrPolicyDenial)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+
+	var result app.Result
+	if err := json.Unmarshal(stderr.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(stderr) error = %v", err)
+	}
+	if result.Code != app.ExitTrustOrPolicyDenial {
+		t.Fatalf("result.code = %d, want %d", result.Code, app.ExitTrustOrPolicyDenial)
+	}
+	if !strings.Contains(result.Message, "outside the operation root") {
+		t.Fatalf("result.message = %q, want trust denial text", result.Message)
 	}
 }
 
 func TestInstallCommandAcceptsArtifactFlag(t *testing.T) {
 	root := t.TempDir()
-	writeInstallFixture(t, root)
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
 
 	var stdout bytes.Buffer
 	code := execute(
 		context.Background(),
-		[]string{"install", "file:" + root, "--artifact", "base-readme"},
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
 		&stdout,
 		&bytes.Buffer{},
 	)
 	if code != int(app.ExitSuccess) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "selected artifact base-readme from local-example-source" {
-		t.Fatalf("stdout = %q, want selected artifact message", got)
+	if got := strings.TrimSpace(stdout.String()); got != "installed artifact base-readme from local-example-source" {
+		t.Fatalf("stdout = %q, want installed artifact message", got)
 	}
 }
 
 func TestJSONOutputEnvelope(t *testing.T) {
 	root := t.TempDir()
-	writeInstallFixture(t, root)
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
 
 	var stdout bytes.Buffer
-	code := execute(context.Background(), []string{"--output", "json", "install", "file:" + root, "--artifact", "base-readme"}, &stdout, &bytes.Buffer{})
+	code := execute(context.Background(), []string{"--output", "json", "install", "file:" + sourceRoot, "--artifact", "base-readme"}, &stdout, &bytes.Buffer{})
 	if code != int(app.ExitSuccess) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
@@ -111,8 +341,219 @@ func TestJSONOutputEnvelope(t *testing.T) {
 	if artifactDetails["name"] != "base-readme" {
 		t.Fatalf("details.artifact.name = %#v, want base-readme", artifactDetails["name"])
 	}
+	if got.Details["change"] != "installed" {
+		t.Fatalf("details.change = %#v, want installed", got.Details["change"])
+	}
+	files, ok := got.Details["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("details.files = %#v, want one file", got.Details["files"])
+	}
 	if _, ok := got.Details["code"]; ok {
 		t.Fatalf("details.code present in details: %#v", got.Details)
+	}
+}
+
+func TestInstallOwnershipConflictReturnsUserActionConflictExitCode(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+	writeTestFile(t, filepath.Join(repoRoot, repositorystate.MaterializationRecordFileName), ""+
+		"schema_version: 1\n"+
+		"artifacts:\n"+
+		"  - key:\n"+
+		"      source:\n"+
+		"        type: file\n"+
+		"        name: other-source\n"+
+		"      resolved_version: local-snapshot-999\n"+
+		"      artifact: other-artifact\n"+
+		"    files:\n"+
+		"      - path: README.md\n"+
+		"        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&stderr,
+	)
+	if code != int(app.ExitUserActionConflict) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitUserActionConflict)
+	}
+	if got := strings.TrimSpace(stderr.String()); !strings.Contains(got, "already owned by another artifact") {
+		t.Fatalf("stderr = %q, want ownership conflict text", got)
+	}
+}
+
+func TestInstallOwnershipConflictReturnsUserActionConflictExitCodeAsJSON(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+	writeTestFile(t, filepath.Join(repoRoot, repositorystate.MaterializationRecordFileName), ""+
+		"schema_version: 1\n"+
+		"artifacts:\n"+
+		"  - key:\n"+
+		"      source:\n"+
+		"        type: file\n"+
+		"        name: other-source\n"+
+		"      resolved_version: local-snapshot-999\n"+
+		"      artifact: other-artifact\n"+
+		"    files:\n"+
+		"      - path: README.md\n"+
+		"        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"--output", "json", "install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&stdout,
+		&stderr,
+	)
+	if code != int(app.ExitUserActionConflict) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitUserActionConflict)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+
+	var result app.Result
+	if err := json.Unmarshal(stderr.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(stderr) error = %v", err)
+	}
+	if result.Code != app.ExitUserActionConflict {
+		t.Fatalf("result.code = %d, want %d", result.Code, app.ExitUserActionConflict)
+	}
+	if !strings.Contains(result.Message, "already owned by another artifact") {
+		t.Fatalf("result.message = %q, want ownership conflict text", result.Message)
+	}
+}
+
+func TestInstallDriftReturnsUserActionConflictExitCode(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	if code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	); code != int(app.ExitSuccess) {
+		t.Fatalf("first install exit code = %d, want 0", code)
+	}
+	writeTestFile(t, filepath.Join(repoRoot, "README.md"), "user edit\n")
+
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&stderr,
+	)
+	if code != int(app.ExitUserActionConflict) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitUserActionConflict)
+	}
+	if got := strings.TrimSpace(stderr.String()); !strings.Contains(got, "has drifted") {
+		t.Fatalf("stderr = %q, want drift text", got)
+	}
+}
+
+func TestInstallDriftReturnsUserActionConflictExitCodeAsJSON(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	if code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	); code != int(app.ExitSuccess) {
+		t.Fatalf("first install exit code = %d, want 0", code)
+	}
+	writeTestFile(t, filepath.Join(repoRoot, "README.md"), "user edit\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := execute(
+		context.Background(),
+		[]string{"--output", "json", "install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&stdout,
+		&stderr,
+	)
+	if code != int(app.ExitUserActionConflict) {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitUserActionConflict)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+
+	var result app.Result
+	if err := json.Unmarshal(stderr.Bytes(), &result); err != nil {
+		t.Fatalf("Unmarshal(stderr) error = %v", err)
+	}
+	if result.Code != app.ExitUserActionConflict {
+		t.Fatalf("result.code = %d, want %d", result.Code, app.ExitUserActionConflict)
+	}
+	if !strings.Contains(result.Message, "has drifted") {
+		t.Fatalf("result.message = %q, want drift text", result.Message)
 	}
 }
 
@@ -368,7 +809,7 @@ func TestDeclareOnlyInstallCommandWritesNoOpHumanMessage(t *testing.T) {
 
 func TestDeclareOnlyInstallCommandWritesManifestAtGitRepositoryRoot(t *testing.T) {
 	repoRoot := t.TempDir()
-	sourceRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
 	writeInstallFixture(t, sourceRoot)
 	initGitRepo(t, repoRoot)
 	subdir := filepath.Join(repoRoot, "nested", "work")
@@ -430,6 +871,7 @@ func writeInstallFixture(t *testing.T, root string) {
 	t.Helper()
 	writeTestFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
 	writeTestFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: README.md\n")
+	writeTestFile(t, filepath.Join(root, "artifacts", "base-readme", "README.md"), "hello\n")
 }
 
 func writeTestFile(t *testing.T, path string, contents string) {

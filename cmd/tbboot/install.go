@@ -29,6 +29,12 @@ type artifactDescriptorJSON struct {
 	Path    string `json:"path"`
 }
 
+type fileChangeJSON struct {
+	Path   string `json:"path"`
+	Action string `json:"action"`
+	Digest string `json:"digest"`
+}
+
 func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra.Command {
 	var artifact string
 	var declareOnly bool
@@ -49,11 +55,29 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 				if declareOnly {
 					return fmt.Errorf("declare-only install requires an explicit <source>")
 				}
-				result := app.Success("sync not implemented")
-				if opts.output == outputJSON {
-					return json.NewEncoder(stdout).Encode(result)
+				root, err := repositoryRoot(ctx)
+				if err != nil {
+					return err
 				}
-				_, err := fmt.Fprintln(stdout, result.Message)
+				result, err := service.Sync(ctx, installsvc.SyncRequest{Root: root})
+				if err != nil {
+					return err
+				}
+				if opts.output == outputJSON {
+					envelope := app.Success("sync succeeded")
+					envelope.Details = map[string]any{
+						"source":   mapSourceIdentity(result.Source),
+						"artifact": mapArtifactDescriptor(result.Artifact),
+						"change":   result.Change,
+						"files":    mapFileChanges(result.Files),
+					}
+					return json.NewEncoder(stdout).Encode(envelope)
+				}
+				if result.Change == installsvc.ChangeNoOp {
+					_, err = fmt.Fprintln(stdout, "sync: no changes")
+					return err
+				}
+				_, err = fmt.Fprintf(stdout, "synced artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
 				return err
 			}
 
@@ -85,8 +109,9 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 					"source":   mapSourceIdentity(result.Source),
 					"artifact": mapArtifactDescriptor(result.Artifact),
 				}
-				if declareOnly {
-					envelope.Details["change"] = result.Change
+				envelope.Details["change"] = result.Change
+				if !declareOnly {
+					envelope.Details["files"] = mapFileChanges(result.Files)
 				}
 				return json.NewEncoder(stdout).Encode(envelope)
 			}
@@ -100,7 +125,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 				return err
 			}
 
-			_, err = fmt.Fprintf(stdout, "selected artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
+			_, err = fmt.Fprintf(stdout, "installed artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
 			return err
 		},
 	}
@@ -124,6 +149,18 @@ func mapArtifactDescriptor(artifact source.ArtifactDescriptor) artifactDescripto
 		Version: artifact.Version,
 		Path:    artifact.Path,
 	}
+}
+
+func mapFileChanges(changes []installsvc.FileChange) []fileChangeJSON {
+	mapped := make([]fileChangeJSON, 0, len(changes))
+	for _, change := range changes {
+		mapped = append(mapped, fileChangeJSON{
+			Path:   change.Path,
+			Action: change.Action,
+			Digest: change.Digest,
+		})
+	}
+	return mapped
 }
 
 func parseSourceRef(raw string) (source.Ref, error) {

@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	supportedSchemaVersion = 1
-	ManifestFileName       = "talby-artifacts.yaml"
-	LockfileFileName       = "talby-artifacts.lock.yaml"
+	supportedSchemaVersion        = 1
+	ManifestFileName              = "talby-artifacts.yaml"
+	LockfileFileName              = "talby-artifacts.lock.yaml"
+	MaterializationRecordFileName = "talby-artifacts.managed.yaml"
 )
 
 type Store interface {
@@ -25,6 +26,8 @@ type Store interface {
 	WriteManifest(context.Context, string, Manifest) error
 	LoadLockfile(context.Context, string) (Lockfile, error)
 	WriteLockfile(context.Context, string, Lockfile) error
+	LoadMaterializationRecord(context.Context, string) (MaterializationRecord, error)
+	WriteMaterializationRecord(context.Context, string, MaterializationRecord) error
 }
 
 type fileStore struct{}
@@ -73,6 +76,27 @@ type lockfileResolutionDTO struct {
 type lockfileArtifactDTO struct {
 	Name    string `yaml:"name"`
 	Version string `yaml:"version"`
+}
+
+type materializationRecordDocument struct {
+	SchemaVersion int                                `yaml:"schema_version"`
+	Artifacts     []materializationArtifactRecordDTO `yaml:"artifacts,omitempty"`
+}
+
+type materializationArtifactRecordDTO struct {
+	Key   materializationArtifactKeyDTO   `yaml:"key"`
+	Files []materializationManagedFileDTO `yaml:"files,omitempty"`
+}
+
+type materializationArtifactKeyDTO struct {
+	Source          SourceIdentity `yaml:"source"`
+	ResolvedVersion string         `yaml:"resolved_version"`
+	Artifact        string         `yaml:"artifact"`
+}
+
+type materializationManagedFileDTO struct {
+	Path   string `yaml:"path"`
+	Digest string `yaml:"digest"`
 }
 
 func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) {
@@ -231,6 +255,97 @@ func (fileStore) WriteLockfile(_ context.Context, root string, lockfile Lockfile
 		return err
 	}
 	return writeFileAtomically(filepath.Join(root, LockfileFileName), bytes, 0o644)
+}
+
+func (fileStore) LoadMaterializationRecord(_ context.Context, root string) (MaterializationRecord, error) {
+	bytes, err := os.ReadFile(filepath.Join(root, MaterializationRecordFileName))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorNotFound, Err: err}
+		}
+		return MaterializationRecord{}, err
+	}
+	if strings.TrimSpace(string(bytes)) == "" {
+		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("file is empty")}
+	}
+
+	var doc materializationRecordDocument
+	if err := yaml.Unmarshal(bytes, &doc); err != nil {
+		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: err}
+	}
+	if doc.SchemaVersion != supportedSchemaVersion {
+		return MaterializationRecord{}, StateFileError{
+			File: StateFileMaterializationRecord,
+			Kind: StateFileErrorInvalidFormat,
+			Err:  fmt.Errorf("schema_version must be %d", supportedSchemaVersion),
+		}
+	}
+
+	record := MaterializationRecord{Artifacts: make([]ManagedArtifactRecord, 0, len(doc.Artifacts))}
+	for _, dto := range doc.Artifacts {
+		files := make([]ManagedFileRecord, 0, len(dto.Files))
+		for _, file := range dto.Files {
+			files = append(files, ManagedFileRecord{
+				Path:   file.Path,
+				Digest: file.Digest,
+			})
+		}
+		record.Artifacts = append(record.Artifacts, ManagedArtifactRecord{
+			Key: ManagedArtifactKey{
+				Source:          dto.Key.Source,
+				ResolvedVersion: dto.Key.ResolvedVersion,
+				Artifact:        dto.Key.Artifact,
+			},
+			Files: files,
+		})
+	}
+	if err := ValidateMaterializationRecord(record); err != nil {
+		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: err}
+	}
+
+	return record, nil
+}
+
+func (fileStore) WriteMaterializationRecord(_ context.Context, root string, record MaterializationRecord) error {
+	if err := ValidateMaterializationRecord(record); err != nil {
+		return err
+	}
+
+	doc := materializationRecordDocument{
+		SchemaVersion: supportedSchemaVersion,
+		Artifacts:     make([]materializationArtifactRecordDTO, 0, len(record.Artifacts)),
+	}
+	artifacts := append([]ManagedArtifactRecord(nil), record.Artifacts...)
+	sort.Slice(artifacts, func(i, j int) bool {
+		return managedArtifactKeyString(artifacts[i].Key) < managedArtifactKeyString(artifacts[j].Key)
+	})
+	for _, artifact := range artifacts {
+		files := append([]ManagedFileRecord(nil), artifact.Files...)
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].Path < files[j].Path
+		})
+		fileDTOs := make([]materializationManagedFileDTO, 0, len(files))
+		for _, file := range files {
+			fileDTOs = append(fileDTOs, materializationManagedFileDTO{
+				Path:   file.Path,
+				Digest: file.Digest,
+			})
+		}
+		doc.Artifacts = append(doc.Artifacts, materializationArtifactRecordDTO{
+			Key: materializationArtifactKeyDTO{
+				Source:          artifact.Key.Source,
+				ResolvedVersion: artifact.Key.ResolvedVersion,
+				Artifact:        artifact.Key.Artifact,
+			},
+			Files: fileDTOs,
+		})
+	}
+
+	bytes, err := encodeYAML(doc)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomically(filepath.Join(root, MaterializationRecordFileName), bytes, 0o644)
 }
 
 func writeFileAtomically(path string, data []byte, mode os.FileMode) error {

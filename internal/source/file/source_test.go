@@ -14,6 +14,7 @@ func TestResolveLoadsSourceIdentityAndArtifacts(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
 	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: README.md\n")
+	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "README.md"), "hello\n")
 
 	resolved, err := New().Resolve(context.Background(), source.ResolveRequest{
 		Ref: source.Ref{Type: "file", Locator: root},
@@ -42,16 +43,24 @@ func TestResolveLoadsSourceIdentityAndArtifacts(t *testing.T) {
 	if resolved.Artifacts[0].Path != "artifacts/base-readme" {
 		t.Fatalf("Artifacts[0].Path = %q, want artifacts/base-readme", resolved.Artifacts[0].Path)
 	}
+	if len(resolved.Artifacts[0].Steps) != 1 {
+		t.Fatalf("len(Artifacts[0].Steps) = %d, want 1", len(resolved.Artifacts[0].Steps))
+	}
+	if got := resolved.Artifacts[0].Steps[0]; got.TargetPath != "README.md" || !strings.HasSuffix(got.SourcePath, "/artifacts/base-readme/README.md") {
+		t.Fatalf("Artifacts[0].Steps[0] = %#v, want resolved whole-file source path", got)
+	}
 }
 
 func TestResolveChangesSnapshotVersionWhenResolvedContentChanges(t *testing.T) {
 	firstRoot := t.TempDir()
 	writeFile(t, filepath.Join(firstRoot, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(firstRoot, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\n")
+	writeFile(t, filepath.Join(firstRoot, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: README.md\n")
+	writeFile(t, filepath.Join(firstRoot, "artifacts", "base-readme", "README.md"), "hello\n")
 
 	secondRoot := t.TempDir()
 	writeFile(t, filepath.Join(secondRoot, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(secondRoot, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 2.0.0\n")
+	writeFile(t, filepath.Join(secondRoot, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: README.md\n")
+	writeFile(t, filepath.Join(secondRoot, "artifacts", "base-readme", "README.md"), "different\n")
 
 	firstResolved, err := New().Resolve(context.Background(), source.ResolveRequest{
 		Ref: source.Ref{Type: "file", Locator: firstRoot},
@@ -69,6 +78,55 @@ func TestResolveChangesSnapshotVersionWhenResolvedContentChanges(t *testing.T) {
 
 	if firstResolved.Identity.Version == secondResolved.Identity.Version {
 		t.Fatalf("Identity.Version = %q for both roots, want different snapshot hashes", firstResolved.Identity.Version)
+	}
+}
+
+func TestResolveRejectsFileStepMissingFields(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
+	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n")
+
+	_, err := New().Resolve(context.Background(), source.ResolveRequest{
+		Ref: source.Ref{Type: "file", Locator: root},
+	})
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want missing file step source error")
+	}
+	if !strings.Contains(err.Error(), "file step source") {
+		t.Fatalf("Resolve() error = %q, want file step source validation error", err)
+	}
+}
+
+func TestResolveRejectsFileStepSourceOutsideArtifactDir(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
+	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: ../secret.txt\n")
+	writeFile(t, filepath.Join(root, "artifacts", "secret.txt"), "shh\n")
+
+	_, err := New().Resolve(context.Background(), source.ResolveRequest{
+		Ref: source.Ref{Type: "file", Locator: root},
+	})
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want file step source path escape error")
+	}
+	if !strings.Contains(err.Error(), "file step source must stay within artifact directory") {
+		t.Fatalf("Resolve() error = %q, want file step source path escape error", err)
+	}
+}
+
+func TestResolveRejectsUnsupportedStepTypes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
+	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: script\n")
+
+	_, err := New().Resolve(context.Background(), source.ResolveRequest{
+		Ref: source.Ref{Type: "file", Locator: root},
+	})
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want unsupported step type error")
+	}
+	if !strings.Contains(err.Error(), `unsupported step type "script"`) {
+		t.Fatalf("Resolve() error = %q, want unsupported step type error", err)
 	}
 }
 
