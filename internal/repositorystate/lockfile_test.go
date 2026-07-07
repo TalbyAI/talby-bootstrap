@@ -1,6 +1,9 @@
 package repositorystate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLockfileUpsertResolutionInsertReplaceAndUnchanged(t *testing.T) {
 	base := Lockfile{}
@@ -119,5 +122,11 @@ func TestValidateLockfileRejectsMissingFieldsAndDuplicates(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("ValidateLockfile() error = nil, want duplicate resolution error")
+	}
+	if strings.Contains(err.Error(), "\x00") {
+		t.Fatalf("ValidateLockfile() error = %q, want readable duplicate error", err)
+	}
+	if !strings.Contains(err.Error(), "source file/local-example-source artifact base-readme") {
+		t.Fatalf("ValidateLockfile() error = %q, want source and artifact identity", err)
 	}
 }

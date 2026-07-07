@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -153,7 +154,7 @@ func (fileStore) WriteManifest(_ context.Context, root string, manifest Manifest
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, ManifestFileName), bytes, 0o644)
+	return writeFileAtomically(filepath.Join(root, ManifestFileName), bytes, 0o644)
 }
 
 func (fileStore) LoadLockfile(_ context.Context, root string) (Lockfile, error) {
@@ -229,7 +230,44 @@ func (fileStore) WriteLockfile(_ context.Context, root string, lockfile Lockfile
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, LockfileFileName), bytes, 0o644)
+	return writeFileAtomically(filepath.Join(root, LockfileFileName), bytes, 0o644)
+}
+
+func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	file, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tempPath := file.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	n, err := file.Write(data)
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
+	if n != len(data) {
+		_ = file.Close()
+		return io.ErrShortWrite
+	}
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	removeTemp = false
+	return nil
 }
 
 func encodeYAML(value any) ([]byte, error) {

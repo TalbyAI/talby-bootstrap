@@ -21,6 +21,13 @@ func requireStateFileError(t *testing.T, err error, file StateFile, kind StateFi
 	}
 }
 
+func TestStateFileErrorFormatsWithoutCause(t *testing.T) {
+	err := StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat}
+	if got := err.Error(); got != "manifest invalid_format" {
+		t.Fatalf("Error() = %q, want nil-safe fallback", got)
+	}
+}
+
 func TestStoreLoadManifestReturnsNotFoundForMissingFile(t *testing.T) {
 	store := NewStore()
 

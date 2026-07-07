@@ -86,6 +86,9 @@ type StateFileError struct {
 }
 
 func (e StateFileError) Error() string {
+	if e.Err == nil {
+		return string(e.File) + " " + string(e.Kind)
+	}
 	return string(e.File) + " " + string(e.Kind) + ": " + e.Err.Error()
 }
 

@@ -24,7 +24,7 @@ func ValidateManifest(m Manifest) error {
 
 		key := declarationKey(decl)
 		if _, ok := seen[key]; ok {
-			return fmt.Errorf("duplicate declaration for %s", key)
+			return fmt.Errorf("duplicate declaration for source %s/%s target %s/%s", decl.Source.Type, decl.Source.Name, decl.Target.Scope, decl.Target.Artifact)
 		}
 		seen[key] = struct{}{}
 	}

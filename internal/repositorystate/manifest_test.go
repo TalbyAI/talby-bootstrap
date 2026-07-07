@@ -1,6 +1,9 @@
 package repositorystate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestManifestUpsertDeclarationInsertReplaceAndUnchanged(t *testing.T) {
 	base := Manifest{}
@@ -104,5 +107,11 @@ func TestValidateManifestRejectsInvalidTargetsAndDuplicates(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("ValidateManifest() error = nil, want duplicate source-scope declaration error")
+	}
+	if strings.Contains(err.Error(), "\x00") {
+		t.Fatalf("ValidateManifest() error = %q, want readable duplicate error", err)
+	}
+	if !strings.Contains(err.Error(), "source file/local-example-source target source/") {
+		t.Fatalf("ValidateManifest() error = %q, want source and target identity", err)
 	}
 }

@@ -21,7 +21,7 @@ func ValidateLockfile(l Lockfile) error {
 
 		key := resolutionKey(res)
 		if _, ok := seen[key]; ok {
-			return fmt.Errorf("duplicate resolution for %s", key)
+			return fmt.Errorf("duplicate resolution for source %s/%s artifact %s", res.Source.Type, res.Source.Name, res.Artifact.Name)
 		}
 		seen[key] = struct{}{}
 	}
