@@ -2,12 +2,14 @@ package install
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/talby/talby-bootstrap/internal/repositorystate"
 	"github.com/talby/talby-bootstrap/internal/source"
 	"github.com/talby/talby-bootstrap/internal/source/file"
 )
@@ -52,7 +54,7 @@ func TestInstallReturnsSelectedArtifact(t *testing.T) {
 	registry := &fakeRegistry{
 		source: sourceImpl,
 	}
-	svc := NewService(registry)
+	svc := NewService(registry, repositorystate.NewStore())
 	req := Request{
 		Source:   source.Ref{Type: "file", Locator: "/tmp/example", Version: "v1.2.3"},
 		Artifact: "base-readme",
@@ -89,7 +91,7 @@ func TestInstallSurfacesResolveError(t *testing.T) {
 	registry := &fakeRegistry{
 		source: sourceImpl,
 	}
-	svc := NewService(registry)
+	svc := NewService(registry, repositorystate.NewStore())
 	req := Request{
 		Source:   source.Ref{Type: "file", Locator: "/tmp/example", Version: "v1.2.3"},
 		Artifact: "base-readme",
@@ -117,7 +119,7 @@ func TestInstallRejectsZeroArtifactTarget(t *testing.T) {
 				Artifacts: []source.ArtifactDescriptor{},
 			},
 		},
-	})
+	}, repositorystate.NewStore())
 
 	_, err := svc.Install(context.Background(), Request{
 		Source:   source.Ref{Type: "file", Locator: "/tmp/example"},
@@ -141,7 +143,7 @@ func TestInstallRejectsAmbiguousArtifactTarget(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, repositorystate.NewStore())
 
 	_, err := svc.Install(context.Background(), Request{
 		Source:   source.Ref{Type: "file", Locator: "/tmp/example"},
@@ -157,7 +159,7 @@ func TestInstallRejectsAmbiguousArtifactTarget(t *testing.T) {
 
 func TestInstallRejectsUnknownSourceType(t *testing.T) {
 	registry := &fakeRegistry{err: fmt.Errorf("unsupported source type %q", "git")}
-	svc := NewService(registry)
+	svc := NewService(registry, repositorystate.NewStore())
 
 	req := Request{
 		Source:   source.Ref{Type: "git", Locator: "github.com/example/library"},
@@ -176,7 +178,7 @@ func TestInstallRejectsUnknownSourceType(t *testing.T) {
 }
 
 func TestInstallRejectsEmptySourceType(t *testing.T) {
-	svc := NewService(&fakeRegistry{})
+	svc := NewService(&fakeRegistry{}, repositorystate.NewStore())
 
 	_, err := svc.Install(context.Background(), Request{
 		Source: source.Ref{Locator: "/tmp/example"},
@@ -190,7 +192,7 @@ func TestInstallRejectsEmptySourceType(t *testing.T) {
 }
 
 func TestInstallRejectsEmptySourceLocator(t *testing.T) {
-	svc := NewService(&fakeRegistry{})
+	svc := NewService(&fakeRegistry{}, repositorystate.NewStore())
 
 	_, err := svc.Install(context.Background(), Request{
 		Source: source.Ref{Type: "file"},
@@ -212,7 +214,7 @@ func TestInstallRejectsMissingNamedArtifact(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, repositorystate.NewStore())
 
 	_, err := svc.Install(context.Background(), Request{
 		Source:   source.Ref{Type: "file", Locator: "/tmp/example"},
@@ -233,7 +235,7 @@ func TestInstallWithRealFileSource(t *testing.T) {
 
 	svc := NewService(source.NewStaticRegistry(map[string]source.Source{
 		"file": file.New(),
-	}))
+	}), repositorystate.NewStore())
 
 	got, err := svc.Install(context.Background(), Request{
 		Source:   source.Ref{Type: "file", Locator: root},
@@ -262,6 +264,283 @@ func TestInstallWithRealFileSource(t *testing.T) {
 	}
 }
 
+func TestDeclareOnlyInstallWritesManifestAtRepositoryRoot(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := t.TempDir()
+	writeInstallFixture(t, sourceRoot)
+
+	svc := NewService(
+		source.NewStaticRegistry(map[string]source.Source{
+			"file": file.New(),
+		}),
+		repositorystate.NewStore(),
+	)
+
+	got, err := svc.Install(context.Background(), Request{
+		Root:        repoRoot,
+		Source:      source.Ref{Type: "file", Locator: sourceRoot},
+		Artifact:    "base-readme",
+		DeclareOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if got.Change != ChangeDeclared {
+		t.Fatalf("Change = %q, want %q", got.Change, ChangeDeclared)
+	}
+
+	manifest, err := repositorystate.NewStore().LoadManifest(context.Background(), repoRoot)
+	if err != nil {
+		t.Fatalf("LoadManifest() error = %v", err)
+	}
+	if len(manifest.Declarations) != 1 {
+		t.Fatalf("len(Declarations) = %d, want 1", len(manifest.Declarations))
+	}
+	if manifest.Declarations[0].Input == nil || manifest.Declarations[0].Input.Locator != sourceRoot {
+		t.Fatalf("declaration input = %#v, want locator %q", manifest.Declarations[0].Input, sourceRoot)
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, repositorystate.ManifestFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source root manifest state error = %v, want not exist", err)
+	}
+}
+
+func TestDeclareOnlyInstallBootstrapsManifestAndWritesDeclaration(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+
+	svc := NewService(
+		source.NewStaticRegistry(map[string]source.Source{
+			"file": file.New(),
+		}),
+		repositorystate.NewStore(),
+	)
+
+	got, err := svc.Install(context.Background(), Request{
+		Root:        repoRoot,
+		Source:      source.Ref{Type: "file", Locator: repoRoot},
+		Artifact:    "base-readme",
+		DeclareOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if got.Change != ChangeDeclared {
+		t.Fatalf("Change = %q, want %q", got.Change, ChangeDeclared)
+	}
+
+	manifest, err := repositorystate.NewStore().LoadManifest(context.Background(), repoRoot)
+	if err != nil {
+		t.Fatalf("LoadManifest() error = %v", err)
+	}
+	if len(manifest.Declarations) != 1 {
+		t.Fatalf("len(Declarations) = %d, want 1", len(manifest.Declarations))
+	}
+	if manifest.Declarations[0].Input == nil || manifest.Declarations[0].Input.Locator != repoRoot {
+		t.Fatalf("declaration input = %#v, want locator %q", manifest.Declarations[0].Input, repoRoot)
+	}
+}
+
+func TestDeclareOnlyInstallRejectsEmptyRoot(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+
+	svc := NewService(
+		source.NewStaticRegistry(map[string]source.Source{"file": file.New()}),
+		repositorystate.NewStore(),
+	)
+	_, err := svc.Install(context.Background(), Request{
+		Source:      source.Ref{Type: "file", Locator: repoRoot},
+		Artifact:    "base-readme",
+		DeclareOnly: true,
+	})
+	if err == nil {
+		t.Fatal("Install() error = nil, want missing root error")
+	}
+	if got, want := err.Error(), "repository root is required for declare-only install"; got != want {
+		t.Fatalf("Install() error = %q, want %q", got, want)
+	}
+}
+
+func TestDeclareOnlyInstallReturnsNoOpForEquivalentDeclaration(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+
+	store := repositorystate.NewStore()
+	if err := store.WriteManifest(context.Background(), repoRoot, repositorystate.Manifest{
+		Declarations: []repositorystate.Declaration{
+			{
+				Source: repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
+				Target: repositorystate.DeclarationTarget{
+					Scope:    repositorystate.DeclarationScopeArtifact,
+					Artifact: "base-readme",
+				},
+				Input: &repositorystate.SourceInput{Locator: repoRoot},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteManifest() error = %v", err)
+	}
+
+	before, err := os.ReadFile(filepath.Join(repoRoot, repositorystate.ManifestFileName))
+	if err != nil {
+		t.Fatalf("ReadFile(before) error = %v", err)
+	}
+
+	svc := NewService(
+		source.NewStaticRegistry(map[string]source.Source{"file": file.New()}),
+		store,
+	)
+	got, err := svc.Install(context.Background(), Request{
+		Root:        repoRoot,
+		Source:      source.Ref{Type: "file", Locator: repoRoot},
+		Artifact:    "base-readme",
+		DeclareOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if got.Change != ChangeNoOp {
+		t.Fatalf("Change = %q, want %q", got.Change, ChangeNoOp)
+	}
+
+	after, err := os.ReadFile(filepath.Join(repoRoot, repositorystate.ManifestFileName))
+	if err != nil {
+		t.Fatalf("ReadFile(after) error = %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("manifest changed on noop:\nBEFORE:\n%s\nAFTER:\n%s", before, after)
+	}
+}
+
+func TestDeclareOnlyInstallRejectsChangedInputAsConflict(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := t.TempDir()
+	writeInstallFixture(t, sourceRoot)
+
+	store := repositorystate.NewStore()
+	if err := store.WriteManifest(context.Background(), repoRoot, repositorystate.Manifest{
+		Declarations: []repositorystate.Declaration{
+			{
+				Source: repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
+				Target: repositorystate.DeclarationTarget{
+					Scope:    repositorystate.DeclarationScopeArtifact,
+					Artifact: "base-readme",
+				},
+				Input: &repositorystate.SourceInput{Locator: "/tmp/old-location"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteManifest() error = %v", err)
+	}
+
+	svc := NewService(
+		source.NewStaticRegistry(map[string]source.Source{"file": file.New()}),
+		store,
+	)
+	_, err := svc.Install(context.Background(), Request{
+		Root:        repoRoot,
+		Source:      source.Ref{Type: "file", Locator: sourceRoot},
+		Artifact:    "base-readme",
+		DeclareOnly: true,
+	})
+	if err == nil {
+		t.Fatal("Install() error = nil, want conflict")
+	}
+
+	var conflictErr ConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("error = %T, want ConflictError", err)
+	}
+	if got, want := err.Error(), `artifact "base-readme" from source "local-example-source" is already declared with different input; use upgrade`; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func TestDeclareOnlyInstallRejectsChangedRequestedVersionAsConflict(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+
+	store := repositorystate.NewStore()
+	if err := store.WriteManifest(context.Background(), repoRoot, repositorystate.Manifest{
+		Declarations: []repositorystate.Declaration{
+			{
+				Source: repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
+				Target: repositorystate.DeclarationTarget{
+					Scope:    repositorystate.DeclarationScopeArtifact,
+					Artifact: "base-readme",
+				},
+				Input: &repositorystate.SourceInput{
+					Locator: repoRoot,
+					Version: "v1.2.3",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteManifest() error = %v", err)
+	}
+
+	svc := NewService(
+		source.NewStaticRegistry(map[string]source.Source{"file": file.New()}),
+		store,
+	)
+	_, err := svc.Install(context.Background(), Request{
+		Root:        repoRoot,
+		Source:      source.Ref{Type: "file", Locator: repoRoot, Version: "v9.9.9"},
+		Artifact:    "base-readme",
+		DeclareOnly: true,
+	})
+	if err == nil {
+		t.Fatal("Install() error = nil, want conflict")
+	}
+
+	var conflictErr ConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("error = %T, want ConflictError", err)
+	}
+}
+
+func TestDeclareOnlyInstallDoesNotCreateOrMutateLockfile(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeInstallFixture(t, repoRoot)
+	writeFile(t, filepath.Join(repoRoot, repositorystate.LockfileFileName), ""+
+		"schema_version: 1\n"+
+		"resolutions:\n"+
+		"  - source:\n"+
+		"      type: file\n"+
+		"      name: local-example-source\n"+
+		"    resolved_version: local-snapshot-001\n"+
+		"    artifact:\n"+
+		"      name: base-readme\n"+
+		"      version: 1.0.0\n")
+
+	before, err := os.ReadFile(filepath.Join(repoRoot, repositorystate.LockfileFileName))
+	if err != nil {
+		t.Fatalf("ReadFile(before lockfile) error = %v", err)
+	}
+
+	svc := NewService(
+		source.NewStaticRegistry(map[string]source.Source{"file": file.New()}),
+		repositorystate.NewStore(),
+	)
+	_, err = svc.Install(context.Background(), Request{
+		Root:        repoRoot,
+		Source:      source.Ref{Type: "file", Locator: repoRoot},
+		Artifact:    "base-readme",
+		DeclareOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	after, err := os.ReadFile(filepath.Join(repoRoot, repositorystate.LockfileFileName))
+	if err != nil {
+		t.Fatalf("ReadFile(after lockfile) error = %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("lockfile changed on declare-only:\nBEFORE:\n%s\nAFTER:\n%s", before, after)
+	}
+}
+
 func writeFile(t *testing.T, path string, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -270,4 +549,10 @@ func writeFile(t *testing.T, path string, contents string) {
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
+}
+
+func writeInstallFixture(t *testing.T, root string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
+	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: README.md\n")
 }

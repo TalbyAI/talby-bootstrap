@@ -3,12 +3,14 @@ package tbboot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/talby/talby-bootstrap/internal/app"
+	installsvc "github.com/talby/talby-bootstrap/internal/install"
 )
 
 const (
@@ -31,15 +33,22 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	if err := root.Execute(); err != nil {
+		code := app.ExitOperationalOrValidationError
+
+		var conflictErr installsvc.ConflictError
+		if errors.As(err, &conflictErr) {
+			code = app.ExitUserActionConflict
+		}
+
 		if opts.output == outputJSON {
 			_ = json.NewEncoder(stderr).Encode(app.Result{
-				Code:    app.ExitOperationalOrValidationError,
+				Code:    code,
 				Message: err.Error(),
 			})
-			return int(app.ExitOperationalOrValidationError)
+			return int(code)
 		}
 		_, _ = fmt.Fprintln(stderr, err)
-		return int(app.ExitOperationalOrValidationError)
+		return int(code)
 	}
 	return int(app.ExitSuccess)
 }

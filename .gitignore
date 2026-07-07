@@ -15,3 +15,7 @@
 
 # Temporary files
 .tmp-*
+
+# Coverage artifacts
+coverage.out
+coverage.html

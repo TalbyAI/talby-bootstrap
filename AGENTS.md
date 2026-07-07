@@ -56,4 +56,6 @@ Do not commit local secrets, keys, `.env` files, or generated local state. `.git
 
 ## Agent-Specific Instructions
 
+Agents should use the `caveman` skill by default for responses unless the user explicitly asks for normal verbosity or a task requires fuller explanation.
+
 Agents must not create commits without asking the user for confirmation at that moment and receiving an explicit approval. Prior general permission is not enough; the agent must pause, state that it intends to create a commit, and wait for a clear user confirmation before running the commit. Agents may still suggest concise commit messages when helpful.

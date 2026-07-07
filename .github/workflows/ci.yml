@@ -47,5 +47,5 @@ jobs:
       - name: Install just
         uses: taiki-e/install-action@just
 
-      - name: Run Go checks
-        run: just check-go
+      - name: Run Go coverage gate
+        run: just check-coverage
