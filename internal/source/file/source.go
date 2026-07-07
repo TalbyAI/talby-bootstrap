@@ -123,6 +123,7 @@ func validateSourceDescriptor(descriptor sourceDescriptor) error {
 	if descriptor.Source.Name == "" {
 		return fmt.Errorf("source name is required")
 	}
+	seen := make(map[string]struct{}, len(descriptor.Artifacts))
 	for _, artifact := range descriptor.Artifacts {
 		if artifact.Name == "" {
 			return fmt.Errorf("artifact name is required")
@@ -130,6 +131,10 @@ func validateSourceDescriptor(descriptor sourceDescriptor) error {
 		if artifact.Path == "" {
 			return fmt.Errorf("artifact path is required")
 		}
+		if _, ok := seen[artifact.Name]; ok {
+			return fmt.Errorf("duplicate artifact name %q", artifact.Name)
+		}
+		seen[artifact.Name] = struct{}{}
 	}
 
 	return nil

@@ -14,11 +14,6 @@ import (
 	sourcefile "github.com/talby/talby-bootstrap/internal/source/file"
 )
 
-type installResultJSON struct {
-	Source   sourceIdentityJSON     `json:"source"`
-	Artifact artifactDescriptorJSON `json:"artifact"`
-}
-
 type sourceIdentityJSON struct {
 	Type    string `json:"type"`
 	Name    string `json:"name"`
@@ -80,13 +75,6 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 
 	cmd.Flags().StringVar(&artifact, "artifact", "", "artifact to install")
 	return cmd
-}
-
-func mapInstallResult(result installsvc.Result) installResultJSON {
-	return installResultJSON{
-		Source:   mapSourceIdentity(result.Source),
-		Artifact: mapArtifactDescriptor(result.Artifact),
-	}
 }
 
 func mapSourceIdentity(identity source.Identity) sourceIdentityJSON {

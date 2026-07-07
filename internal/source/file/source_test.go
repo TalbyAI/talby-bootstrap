@@ -214,6 +214,23 @@ func TestResolveRejectsMissingArtifactVersion(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsDuplicateArtifactNames(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n  - name: base-readme\n    path: artifacts/alternate-readme\n")
+	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\n")
+	writeFile(t, filepath.Join(root, "artifacts", "alternate-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 2.0.0\n")
+
+	_, err := New().Resolve(context.Background(), source.ResolveRequest{
+		Ref: source.Ref{Type: "file", Locator: root},
+	})
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want duplicate artifact name error")
+	}
+	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "duplicate artifact name") {
+		t.Fatalf("Resolve() error = %q, want duplicate artifact name error", err)
+	}
+}
+
 func writeFile(t *testing.T, path string, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
