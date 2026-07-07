@@ -444,7 +444,7 @@ func writeTestFile(t *testing.T, path string, contents string) {
 
 func initGitRepo(t *testing.T, root string) {
 	t.Helper()
-	cmd := exec.Command("git", "init", "-q", root)
+	cmd := exec.CommandContext(t.Context(), "git", "init", "-q", root)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %q error = %v, output = %s", root, err, output)
 	}

@@ -61,7 +61,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 			if err != nil {
 				return err
 			}
-			root, err := repositoryRoot()
+			root, err := repositoryRoot(ctx)
 			if err != nil {
 				return err
 			}
@@ -138,17 +138,17 @@ func parseSourceRef(raw string) (source.Ref, error) {
 	}, nil
 }
 
-func repositoryRoot() (string, error) {
+func repositoryRoot(ctx context.Context) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
 
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	cmd.Dir = cwd
 	output, err := cmd.Output()
 	if err != nil {
-		return cwd, nil
+		return cwd, nil //nolint:nilerr // fall back to cwd outside a git repository
 	}
 
 	root := strings.TrimSpace(string(output))
