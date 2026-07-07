@@ -31,6 +31,13 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	if err := root.Execute(); err != nil {
+		if opts.output == outputJSON {
+			_ = json.NewEncoder(stderr).Encode(app.Result{
+				Code:    app.ExitOperationalOrValidationError,
+				Message: err.Error(),
+			})
+			return int(app.ExitOperationalOrValidationError)
+		}
 		_, _ = fmt.Fprintln(stderr, err)
 		return int(app.ExitOperationalOrValidationError)
 	}
@@ -54,7 +61,7 @@ func newRootCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 		}
 	}
 	root.AddCommand(
-		placeholderCommand(ctx, opts, stdout, "install", []string{"i"}, "Install or sync artifacts"),
+		installCommand(ctx, opts, stdout),
 		placeholderCommand(ctx, opts, stdout, "upgrade", nil, "Upgrade declared artifacts"),
 		placeholderCommand(ctx, opts, stdout, "search", nil, "Search configured catalogs"),
 		placeholderCommand(ctx, opts, stdout, "logs", nil, "Replay recorded operations"),

@@ -8,8 +8,8 @@ If both plugins are installed for Codex, do they affect how the agent responds t
 
 ## Sources
 
-- Superpowers repository: https://github.com/obra/superpowers
-- Ponytail repository: https://github.com/DietrichGebert/ponytail
+- Superpowers repository: <https://github.com/obra/superpowers>
+- Ponytail repository: <https://github.com/DietrichGebert/ponytail>
 - Local installed skill files:
   - `superpowers/skills/using-superpowers/SKILL.md`
   - `superpowers/skills/brainstorming/SKILL.md`
