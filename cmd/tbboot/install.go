@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -60,7 +61,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 			if err != nil {
 				return err
 			}
-			root, err := os.Getwd()
+			root, err := repositoryRoot()
 			if err != nil {
 				return err
 			}
@@ -135,4 +136,24 @@ func parseSourceRef(raw string) (source.Ref, error) {
 		Type:    sourceType,
 		Locator: locator,
 	}, nil
+}
+
+func repositoryRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = cwd
+	output, err := cmd.Output()
+	if err != nil {
+		return cwd, nil
+	}
+
+	root := strings.TrimSpace(string(output))
+	if root == "" {
+		return cwd, nil
+	}
+	return root, nil
 }

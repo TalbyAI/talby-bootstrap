@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -365,16 +366,21 @@ func TestDeclareOnlyInstallCommandWritesNoOpHumanMessage(t *testing.T) {
 	}
 }
 
-func TestDeclareOnlyInstallCommandWritesManifestInCurrentWorkingDirectory(t *testing.T) {
+func TestDeclareOnlyInstallCommandWritesManifestAtGitRepositoryRoot(t *testing.T) {
 	repoRoot := t.TempDir()
 	sourceRoot := t.TempDir()
 	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+	subdir := filepath.Join(repoRoot, "nested", "work")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", subdir, err)
+	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd() error = %v", err)
 	}
-	if err := os.Chdir(repoRoot); err != nil {
+	if err := os.Chdir(subdir); err != nil {
 		t.Fatalf("Chdir() error = %v", err)
 	}
 	defer func() {
@@ -395,6 +401,9 @@ func TestDeclareOnlyInstallCommandWritesManifestInCurrentWorkingDirectory(t *tes
 
 	if _, err := os.Stat(filepath.Join(repoRoot, repositorystate.ManifestFileName)); err != nil {
 		t.Fatalf("repo root manifest stat error = %v, want nil", err)
+	}
+	if _, err := os.Stat(filepath.Join(subdir, repositorystate.ManifestFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("subdir manifest state error = %v, want not exist", err)
 	}
 	if _, err := os.Stat(filepath.Join(sourceRoot, repositorystate.ManifestFileName)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("source root manifest state error = %v, want not exist", err)
@@ -430,5 +439,13 @@ func writeTestFile(t *testing.T, path string, contents string) {
 	}
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func initGitRepo(t *testing.T, root string) {
+	t.Helper()
+	cmd := exec.Command("git", "init", "-q", root)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init %q error = %v, output = %s", root, err, output)
 	}
 }
