@@ -1,0 +1,5 @@
+schema_version: 1
+sources:
+  - source:
+      type: file
+      name: local-example-source

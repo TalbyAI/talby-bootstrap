@@ -1,0 +1,8 @@
+schema_version: 1
+source:
+  name: conflicting-source
+artifacts:
+  - name: alpha
+    path: artifacts/alpha
+  - name: beta
+    path: artifacts/beta

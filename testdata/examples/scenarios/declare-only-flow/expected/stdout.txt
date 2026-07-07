@@ -1,0 +1,1 @@
+declared source file:local-example-source without materializing artifacts

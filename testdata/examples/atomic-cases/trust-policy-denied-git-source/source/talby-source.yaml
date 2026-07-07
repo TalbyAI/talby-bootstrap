@@ -1,0 +1,6 @@
+schema_version: 1
+source:
+  name: github.com/example/library
+artifacts:
+  - name: base-readme
+    path: artifacts/base-readme

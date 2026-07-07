@@ -1,0 +1,8 @@
+schema_version: 1
+artifact:
+  name: ci-github
+  version: 1.0.0
+steps:
+  - type: file
+    path: .github/workflows/ci.yml
+    source: ci.yml

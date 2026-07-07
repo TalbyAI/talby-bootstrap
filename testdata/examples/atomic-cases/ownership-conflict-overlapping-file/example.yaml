@@ -1,0 +1,23 @@
+schema_version: 1
+id: ownership-conflict-overlapping-file
+kind: atomic-case
+polarity: negative
+summary: Reject materialization when two managed artifacts claim the same file.
+commands:
+  - argv:
+      - tbboot
+      - install
+      - file:conflicting-source
+verification:
+  exit_code: exact
+  stdout_text: contains
+  stdout_json: absent
+  consumer_state: exact
+normative_outputs:
+  - expected/exit-code.txt
+  - expected/stdout-contains.yaml
+  - expected/consumer
+tags:
+  - ownership-conflict
+  - materialization
+  - negative

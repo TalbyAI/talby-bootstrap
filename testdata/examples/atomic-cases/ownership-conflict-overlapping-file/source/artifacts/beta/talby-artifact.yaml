@@ -1,0 +1,8 @@
+schema_version: 1
+artifact:
+  name: beta
+  version: 1.0.0
+steps:
+  - type: file
+    path: README.md
+    source: README.md

@@ -1,0 +1,25 @@
+schema_version: 1
+id: ambiguous-install-target-rejected
+kind: atomic-case
+polarity: negative
+summary: Reject an explicit install target that does not resolve to exactly one artifact.
+commands:
+  - argv:
+      - tbboot
+      - install
+      - file:local-example-source
+      - --artifact
+      - ""
+verification:
+  exit_code: exact
+  stdout_text: contains
+  stdout_json: absent
+  consumer_state: exact
+normative_outputs:
+  - expected/exit-code.txt
+  - expected/stdout-contains.yaml
+  - expected/consumer
+tags:
+  - install
+  - validation
+  - negative

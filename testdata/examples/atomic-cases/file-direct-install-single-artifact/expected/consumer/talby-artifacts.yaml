@@ -1,0 +1,6 @@
+schema_version: 1
+artifacts:
+  - source:
+      type: file
+      name: local-example-source
+    artifact: base-readme

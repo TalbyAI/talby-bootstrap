@@ -1,0 +1,26 @@
+schema_version: 1
+id: declare-only-manifest-only
+kind: atomic-case
+polarity: positive
+summary: Declare one artifact without changing the lockfile or materialized files.
+commands:
+  - argv:
+      - tbboot
+      - install
+      - file:local-example-source
+      - --artifact
+      - base-readme
+      - --declare-only
+verification:
+  exit_code: exact
+  stdout_text: contains
+  stdout_json: absent
+  consumer_state: exact
+normative_outputs:
+  - expected/exit-code.txt
+  - expected/stdout-contains.yaml
+  - expected/consumer
+tags:
+  - declare-only
+  - manifest
+  - single-artifact

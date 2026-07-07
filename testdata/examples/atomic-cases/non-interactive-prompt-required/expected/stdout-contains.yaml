@@ -1,0 +1,3 @@
+fragments:
+  - prompt required
+  - non-interactive mode

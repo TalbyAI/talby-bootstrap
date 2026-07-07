@@ -1,0 +1,3 @@
+fragments:
+  - source git:github.com/example/library is not approved
+  - add the source to the Manifest trust policy to continue
