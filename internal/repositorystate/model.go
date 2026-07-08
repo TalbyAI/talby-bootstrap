@@ -46,6 +46,26 @@ type Lockfile struct {
 	Resolutions []Resolution
 }
 
+type MaterializationRecord struct {
+	Artifacts []ManagedArtifactRecord
+}
+
+type ManagedArtifactRecord struct {
+	Key   ManagedArtifactKey
+	Files []ManagedFileRecord
+}
+
+type ManagedArtifactKey struct {
+	Source          SourceIdentity
+	ResolvedVersion string
+	Artifact        string
+}
+
+type ManagedFileRecord struct {
+	Path   string
+	Digest string
+}
+
 type Resolution struct {
 	Source          SourceIdentity
 	ResolvedVersion string
@@ -68,8 +88,9 @@ const (
 type StateFile string
 
 const (
-	StateFileManifest StateFile = "manifest"
-	StateFileLockfile StateFile = "lockfile"
+	StateFileManifest              StateFile = "manifest"
+	StateFileLockfile              StateFile = "lockfile"
+	StateFileMaterializationRecord StateFile = "materialization_record"
 )
 
 type StateFileErrorKind string

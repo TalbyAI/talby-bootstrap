@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,9 +38,16 @@ type artifactDescriptor struct {
 		Name    string `yaml:"name"`
 		Version string `yaml:"version"`
 	} `yaml:"artifact"`
+	Steps []artifactStep `yaml:"steps"`
 }
 
 type Source struct{}
+
+type artifactStep struct {
+	Type   string `yaml:"type"`
+	Path   string `yaml:"path"`
+	Source string `yaml:"source"`
+}
 
 func New() Source {
 	return Source{}
@@ -105,10 +113,42 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 		snapshot.Write([]byte{0})
 		snapshot.Write(artifactBytes)
 
+		steps := make([]source.MaterializationStep, 0, len(descriptor.Steps))
+		for _, step := range descriptor.Steps {
+			if step.Type != "file" {
+				return source.ResolvedSource{}, fmt.Errorf("parse %s: %w", artifactPath, fmt.Errorf("unsupported step type %q", step.Type))
+			}
+			if step.Path == "" {
+				return source.ResolvedSource{}, fmt.Errorf("parse %s: %w", artifactPath, fmt.Errorf("file step path is required"))
+			}
+			if step.Source == "" {
+				return source.ResolvedSource{}, fmt.Errorf("parse %s: %w", artifactPath, fmt.Errorf("file step source is required"))
+			}
+
+			stepSourcePath, err := resolveRelativePath(artifactDir, step.Source, "file step source must stay within artifact directory")
+			if err != nil {
+				return source.ResolvedSource{}, fmt.Errorf("parse %s: %w", artifactPath, err)
+			}
+			stepBytes, err := os.ReadFile(stepSourcePath)
+			if err != nil {
+				return source.ResolvedSource{}, fmt.Errorf("read %s: %w", stepSourcePath, err)
+			}
+			snapshot.Write([]byte(step.Path))
+			snapshot.Write([]byte{0})
+			snapshot.Write(stepBytes)
+
+			steps = append(steps, source.MaterializationStep{
+				Type:       step.Type,
+				TargetPath: step.Path,
+				SourcePath: stepSourcePath,
+			})
+		}
+
 		resolved.Artifacts = append(resolved.Artifacts, source.ArtifactDescriptor{
 			Name:    artifactRef.Name,
 			Version: descriptor.Artifact.Version,
 			Path:    artifactRef.Path,
+			Steps:   steps,
 		})
 	}
 	resolved.Identity.Version = "local-snapshot-" + hex.EncodeToString(snapshot.Sum(nil))
@@ -141,12 +181,16 @@ func validateSourceDescriptor(descriptor sourceDescriptor) error {
 }
 
 func resolveArtifactDir(root string, artifactPath string) (string, error) {
-	cleanPath := filepath.Clean(artifactPath)
+	return resolveRelativePath(root, artifactPath, "artifact path must stay within source root")
+}
+
+func resolveRelativePath(root string, relativePath string, errText string) (string, error) {
+	cleanPath := filepath.Clean(relativePath)
 	if cleanPath == "." || cleanPath == ".." || filepath.IsAbs(cleanPath) {
-		return "", fmt.Errorf("artifact path must stay within source root")
+		return "", errors.New(errText)
 	}
 	if len(cleanPath) >= 3 && cleanPath[:3] == ".."+string(filepath.Separator) {
-		return "", fmt.Errorf("artifact path must stay within source root")
+		return "", errors.New(errText)
 	}
 
 	return filepath.Join(root, cleanPath), nil

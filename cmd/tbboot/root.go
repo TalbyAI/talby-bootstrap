@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/talby/talby-bootstrap/internal/app"
 	installsvc "github.com/talby/talby-bootstrap/internal/install"
+	"github.com/talby/talby-bootstrap/internal/materialize"
 )
 
 const (
@@ -37,6 +38,22 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 
 		var conflictErr installsvc.ConflictError
 		if errors.As(err, &conflictErr) {
+			code = app.ExitUserActionConflict
+		}
+		var removalErr installsvc.ManagedArtifactRemovalError
+		if errors.As(err, &removalErr) {
+			code = app.ExitUserActionConflict
+		}
+		var trustErr installsvc.TrustPolicyError
+		if errors.As(err, &trustErr) {
+			code = app.ExitTrustOrPolicyDenial
+		}
+		var ownershipErr materialize.OwnershipConflictError
+		if errors.As(err, &ownershipErr) {
+			code = app.ExitUserActionConflict
+		}
+		var driftErr materialize.DriftError
+		if errors.As(err, &driftErr) {
 			code = app.ExitUserActionConflict
 		}
 

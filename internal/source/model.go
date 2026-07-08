@@ -23,6 +23,13 @@ type ArtifactDescriptor struct {
 	Name    string
 	Version string
 	Path    string
+	Steps   []MaterializationStep
+}
+
+type MaterializationStep struct {
+	Type       string
+	TargetPath string
+	SourcePath string
 }
 
 type Identity struct {
