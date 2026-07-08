@@ -310,6 +310,47 @@ func TestDiscoverRequiresStderrExpectedFiles(t *testing.T) {
 	}
 }
 
+func TestDiscoverAllowsGitExampleWithoutSource(t *testing.T) {
+	root := t.TempDir()
+	exampleDir := filepath.Join(root, "atomic-cases", "git-example")
+	mkdirAll(t, filepath.Join(root, "scenarios"))
+	mkdirAll(t, filepath.Join(root, "atomic-cases"))
+	mkdirAll(t, filepath.Join(exampleDir, "consumer"))
+	mkdirAll(t, filepath.Join(exampleDir, "expected"))
+	writeFile(t, filepath.Join(root, "README.md"), "# Examples\n")
+	writeFile(t, filepath.Join(exampleDir, "README.md"), "# Git Example\n")
+	writeFile(t, filepath.Join(exampleDir, "example.yaml"), ""+
+		"schema_version: 1\n"+
+		"id: git-example\n"+
+		"kind: atomic-case\n"+
+		"status: skipped\n"+
+		"polarity: negative\n"+
+		"summary: Git examples do not need a local source descriptor.\n"+
+		"commands:\n"+
+		"  - argv:\n"+
+		"      - tbboot\n"+
+		"      - install\n"+
+		"      - git:github.com/example/library\n"+
+		"verification:\n"+
+		"  exit_code: exact\n"+
+		"  stdout_text: absent\n"+
+		"  stdout_json: absent\n"+
+		"  stderr_text: absent\n"+
+		"  stderr_json: absent\n"+
+		"  consumer_state: absent\n"+
+		"normative_outputs:\n"+
+		"  - expected/exit-code.txt\n")
+	writeFile(t, filepath.Join(exampleDir, "expected", "exit-code.txt"), "0\n")
+
+	library, err := Discover(root)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if got, want := len(library.Examples), 1; got != want {
+		t.Fatalf("len(library.Examples) = %d, want %d", got, want)
+	}
+}
+
 func TestExampleStatusHelpers(t *testing.T) {
 	cases := []struct {
 		status      string

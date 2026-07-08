@@ -99,14 +99,19 @@ func stageExample(t *testing.T, example examples.Example) string {
 
 	workspace := t.TempDir()
 	copyTree(t, filepath.Join(example.Path, "consumer"), workspace)
-	sourceAlias := readExampleSourceAlias(t, example)
-	copyTree(t, filepath.Join(example.Path, "source"), filepath.Join(workspace, ".tbboot-example", "sources", filepath.FromSlash(sourceAlias)))
+	sourceAlias, ok := readExampleSourceAlias(t, example)
+	if ok {
+		copyTree(t, filepath.Join(example.Path, "source"), filepath.Join(workspace, ".tbboot-example", "sources", filepath.FromSlash(sourceAlias)))
+	}
 	return workspace
 }
 
-func readExampleSourceAlias(t *testing.T, example examples.Example) string {
+func readExampleSourceAlias(t *testing.T, example examples.Example) (string, bool) {
 	t.Helper()
 
+	if !exampleUsesFileSource(example.Metadata.Commands) {
+		return "", false
+	}
 	data, err := os.ReadFile(filepath.Join(example.Path, "source", "talby-source.yaml"))
 	if err != nil {
 		t.Fatalf("ReadFile(source/talby-source.yaml) error = %v", err)
@@ -122,7 +127,7 @@ func readExampleSourceAlias(t *testing.T, example examples.Example) string {
 	if descriptor.Source.Name == "" {
 		t.Fatal("source/talby-source.yaml missing source.name")
 	}
-	return descriptor.Source.Name
+	return descriptor.Source.Name, true
 }
 
 func normalizeExampleArgs(argv []string, workspace string) ([]string, error) {
@@ -144,6 +149,47 @@ func normalizeExampleArgs(argv []string, workspace string) ([]string, error) {
 		}
 	}
 	return args, nil
+}
+
+func exampleUsesFileSource(commands []examples.Command) bool {
+	for _, command := range commands {
+		for _, arg := range command.Argv {
+			if strings.HasPrefix(arg, "file:") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestStageExampleWithoutSource(t *testing.T) {
+	exampleRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(exampleRoot, "consumer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(consumer) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(exampleRoot, "consumer", "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(consumer/README.md) error = %v", err)
+	}
+
+	workspace := stageExample(t, examples.Example{
+		Path: exampleRoot,
+		Metadata: examples.Metadata{
+			Commands: []examples.Command{
+				{Argv: []string{"tbboot", "install", "git:github.com/example/library"}},
+			},
+		},
+	})
+
+	data, err := os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if string(data) != "hello\n" {
+		t.Fatalf("README.md = %q, want %q", string(data), "hello\n")
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".tbboot-example")); !os.IsNotExist(err) {
+		t.Fatalf(".tbboot-example err = %v, want not exist", err)
+	}
 }
 
 func copyTree(t *testing.T, src string, dst string) {

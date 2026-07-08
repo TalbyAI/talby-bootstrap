@@ -99,10 +99,7 @@ func loadExample(path string, parentGroup string) (Example, error) {
 	if err := requireFile(path, "example.yaml"); err != nil {
 		return Example{}, err
 	}
-	if err := requireFile(filepath.Join(path, "source"), "talby-source.yaml"); err != nil {
-		return Example{}, err
-	}
-	for _, dir := range []string{"source", "consumer", "expected"} {
+	for _, dir := range []string{"consumer", "expected"} {
 		if err := requireDir(path, dir); err != nil {
 			return Example{}, err
 		}
@@ -121,8 +118,17 @@ func loadExample(path string, parentGroup string) (Example, error) {
 	if err := validateMetadata(path, parentGroup, meta); err != nil {
 		return Example{}, err
 	}
-	if err := validateSourceDescriptor(filepath.Join(path, "source", "talby-source.yaml"), meta.ID); err != nil {
-		return Example{}, err
+	if exampleUsesFileSource(meta.Commands) {
+		if err := requireDir(path, "source"); err != nil {
+			return Example{}, err
+		}
+		sourceDescriptorPath := filepath.Join(path, "source", "talby-source.yaml")
+		if err := requireFile(filepath.Join(path, "source"), "talby-source.yaml"); err != nil {
+			return Example{}, err
+		}
+		if err := validateSourceDescriptor(sourceDescriptorPath, meta.ID); err != nil {
+			return Example{}, err
+		}
 	}
 
 	return Example{
@@ -212,6 +218,18 @@ func isOneOf(got string, wants ...string) bool {
 	for _, want := range wants {
 		if got == want {
 			return true
+		}
+	}
+
+	return false
+}
+
+func exampleUsesFileSource(commands []Command) bool {
+	for _, command := range commands {
+		for _, arg := range command.Argv {
+			if len(arg) > len("file:") && arg[:len("file:")] == "file:" {
+				return true
+			}
 		}
 	}
 
