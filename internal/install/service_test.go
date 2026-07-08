@@ -669,6 +669,9 @@ func TestInstallRemovesNewManagedFilesWhenManagedStateWriteFails(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(root, "README.md")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("README.md stat error = %v, want not exist", statErr)
 	}
+	if _, statErr := os.Stat(filepath.Join(root, repositorystate.LockfileFileName)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("lockfile stat error = %v, want not exist", statErr)
+	}
 	if _, statErr := os.Stat(filepath.Join(root, repositorystate.MaterializationRecordFileName)); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("managed-state stat error = %v, want not exist", statErr)
 	}

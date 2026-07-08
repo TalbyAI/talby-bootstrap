@@ -159,15 +159,6 @@ func (s Service) Install(ctx context.Context, req Request) (Result, error) {
 		return result, nil
 	}
 
-	lockfile, err := s.loadLockfileOrEmpty(ctx, req.Root)
-	if err != nil {
-		return Result{}, err
-	}
-	nextLockfile, _ := lockfile.UpsertResolution(LockfileResolution(result))
-	if err := s.store.WriteLockfile(ctx, req.Root, nextLockfile); err != nil {
-		return Result{}, err
-	}
-
 	record, err := s.loadMaterializationRecordOrEmpty(ctx, req.Root)
 	if err != nil {
 		return Result{}, err
@@ -184,6 +175,18 @@ func (s Service) Install(ctx context.Context, req Request) (Result, error) {
 
 	nextRecord := repositorystate.UpsertManagedArtifact(record, ManagedArtifactRecordFor(result, matResult))
 	if err := s.store.WriteMaterializationRecord(ctx, req.Root, nextRecord); err != nil {
+		rollbackCreatedFiles(matResult.CreatedPaths)
+		return Result{}, err
+	}
+
+	lockfile, err := s.loadLockfileOrEmpty(ctx, req.Root)
+	if err != nil {
+		rollbackCreatedFiles(matResult.CreatedPaths)
+		return Result{}, err
+	}
+
+	nextLockfile, _ := lockfile.UpsertResolution(LockfileResolution(result))
+	if err := s.store.WriteLockfile(ctx, req.Root, nextLockfile); err != nil {
 		rollbackCreatedFiles(matResult.CreatedPaths)
 		return Result{}, err
 	}

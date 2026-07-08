@@ -96,6 +96,77 @@ func TestInstallCommandWithoutSourceRunsSyncShape(t *testing.T) {
 	}
 }
 
+func TestInstallCommandWithoutSourceRunsSyncShapeAsJSON(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceRoot := filepath.Join(repoRoot, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, repoRoot)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	}()
+
+	if code := execute(
+		context.Background(),
+		[]string{"install", "file:" + sourceRoot, "--artifact", "base-readme"},
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+	); code != int(app.ExitSuccess) {
+		t.Fatalf("first install exit code = %d, want 0", code)
+	}
+
+	var stdout bytes.Buffer
+	code := execute(context.Background(), []string{"--output", "json", "install"}, &stdout, &bytes.Buffer{})
+	if code != int(app.ExitSuccess) {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+
+	var got struct {
+		Code    int            `json:"code"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal(stdout) error = %v", err)
+	}
+	if got.Code != int(app.ExitSuccess) {
+		t.Fatalf("code = %d, want 0", got.Code)
+	}
+	if got.Message != "sync succeeded" {
+		t.Fatalf("message = %q, want sync succeeded", got.Message)
+	}
+	sourceDetails, ok := got.Details["source"].(map[string]any)
+	if !ok {
+		t.Fatalf("details.source = %#v, want object", got.Details["source"])
+	}
+	artifactDetails, ok := got.Details["artifact"].(map[string]any)
+	if !ok {
+		t.Fatalf("details.artifact = %#v, want object", got.Details["artifact"])
+	}
+	if sourceDetails["name"] != "local-example-source" {
+		t.Fatalf("details.source.name = %#v, want local-example-source", sourceDetails["name"])
+	}
+	if artifactDetails["name"] != "base-readme" {
+		t.Fatalf("details.artifact.name = %#v, want base-readme", artifactDetails["name"])
+	}
+	if got.Details["change"] != "noop" {
+		t.Fatalf("details.change = %#v, want noop", got.Details["change"])
+	}
+	files, ok := got.Details["files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("details.files = %#v, want one file", got.Details["files"])
+	}
+}
+
 func TestInstallCommandWithoutSourceStopsOnDrift(t *testing.T) {
 	repoRoot := t.TempDir()
 	sourceRoot := filepath.Join(repoRoot, "source")
