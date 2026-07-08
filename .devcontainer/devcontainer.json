@@ -15,7 +15,7 @@
 		"ghcr.io/devcontainers-extra/features/ripgrep:1": {},
 		"ghcr.io/devcontainers/features/node:2": {},
 		"ghcr.io/devcontainers/features/powershell:2": {},
-		"ghcr.io/devcontainers/features/docker-in-docker:4": {
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
 			"moby": false
 		}
 	},
