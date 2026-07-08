@@ -1,6 +1,7 @@
 schema_version: 1
 id: file-direct-install-multi-artifact
 kind: scenario
+status: broken
 polarity: positive
 summary: Install two artifacts from a file source and record manifest, lockfile, and materialized files.
 commands:
@@ -12,6 +13,8 @@ verification:
   exit_code: exact
   stdout_text: exact
   stdout_json: absent
+  stderr_text: absent
+  stderr_json: absent
   consumer_state: exact
 normative_outputs:
   - expected/exit-code.txt

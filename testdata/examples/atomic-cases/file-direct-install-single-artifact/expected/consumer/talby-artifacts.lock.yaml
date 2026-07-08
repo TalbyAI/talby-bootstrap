@@ -1,8 +1,9 @@
 schema_version: 1
-artifacts:
+resolutions:
   - source:
       type: file
       name: local-example-source
-      version: local-snapshot-001
-    artifact: base-readme
-    version: 1.0.0
+    resolved_version: local-snapshot-03cab323e9b749253e407d73a49bd39e833a268bb4b8507266acf28b3d69df4a
+    artifact:
+      name: base-readme
+      version: 1.0.0

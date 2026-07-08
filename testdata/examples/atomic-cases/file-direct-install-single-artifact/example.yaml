@@ -1,6 +1,7 @@
 schema_version: 1
 id: file-direct-install-single-artifact
 kind: atomic-case
+status: active
 polarity: positive
 summary: Install one artifact from a file source with a minimal successful result.
 commands:
@@ -14,6 +15,8 @@ verification:
   exit_code: exact
   stdout_text: contains
   stdout_json: absent
+  stderr_text: absent
+  stderr_json: absent
   consumer_state: exact
 normative_outputs:
   - expected/exit-code.txt

@@ -1,6 +1,7 @@
 schema_version: 1
 id: json-success-envelope-minimal
 kind: atomic-case
+status: active
 polarity: positive
 summary: Return the minimal JSON success envelope for a successful install.
 commands:
@@ -16,6 +17,8 @@ verification:
   exit_code: exact
   stdout_text: absent
   stdout_json: exact
+  stderr_text: absent
+  stderr_json: absent
   consumer_state: absent
 normative_outputs:
   - expected/exit-code.txt

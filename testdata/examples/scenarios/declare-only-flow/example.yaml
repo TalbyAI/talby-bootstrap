@@ -1,6 +1,7 @@
 schema_version: 1
 id: declare-only-flow
 kind: scenario
+status: active
 polarity: positive
 summary: Declare a file source install without lockfile or materialization changes.
 commands:
@@ -13,6 +14,8 @@ verification:
   exit_code: exact
   stdout_text: exact
   stdout_json: absent
+  stderr_text: absent
+  stderr_json: absent
   consumer_state: exact
 normative_outputs:
   - expected/exit-code.txt

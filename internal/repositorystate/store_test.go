@@ -28,6 +28,17 @@ func TestStateFileErrorFormatsWithoutCause(t *testing.T) {
 	}
 }
 
+func TestStateFileErrorUnwrapsCause(t *testing.T) {
+	cause := errors.New("boom")
+	err := StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: cause}
+	if !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(err, cause) = false, want true")
+	}
+	if got := err.Unwrap(); got != cause {
+		t.Fatalf("Unwrap() = %v, want %v", got, cause)
+	}
+}
+
 func TestStoreLoadManifestReturnsNotFoundForMissingFile(t *testing.T) {
 	store := NewStore()
 
@@ -339,4 +350,87 @@ func TestStoreLoadLockfileRejectsDuplicateOnDiskState(t *testing.T) {
 		t.Fatal("LoadLockfile() error = nil, want invalid_format error")
 	}
 	requireStateFileError(t, err, StateFileLockfile, StateFileErrorInvalidFormat)
+}
+
+func TestStoreLoadMaterializationRecordReturnsNotFoundForMissingFile(t *testing.T) {
+	store := NewStore()
+
+	_, err := store.LoadMaterializationRecord(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("LoadMaterializationRecord() error = nil, want StateFileError")
+	}
+	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorNotFound)
+}
+
+func TestStoreLoadMaterializationRecordTreatsEmptyAndInvalidFilesAsInvalidFormat(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore()
+	path := filepath.Join(root, MaterializationRecordFileName)
+
+	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := store.LoadMaterializationRecord(context.Background(), root)
+	if err == nil {
+		t.Fatal("LoadMaterializationRecord() error = nil, want invalid_format error")
+	}
+	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorInvalidFormat)
+
+	if err := os.WriteFile(path, []byte("schema_version: 2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err = store.LoadMaterializationRecord(context.Background(), root)
+	if err == nil {
+		t.Fatal("LoadMaterializationRecord() error = nil, want invalid_format error")
+	}
+	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorInvalidFormat)
+
+	if err := os.WriteFile(path, []byte("schema_version: [\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err = store.LoadMaterializationRecord(context.Background(), root)
+	if err == nil {
+		t.Fatal("LoadMaterializationRecord() error = nil, want invalid_format error")
+	}
+	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorInvalidFormat)
+}
+
+func TestStoreLoadMaterializationRecordRejectsDuplicateOnDiskState(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore()
+	path := filepath.Join(root, MaterializationRecordFileName)
+
+	content := "" +
+		"schema_version: 1\n" +
+		"artifacts:\n" +
+		"  - key:\n" +
+		"      source:\n" +
+		"        type: file\n" +
+		"        name: one\n" +
+		"      resolved_version: local-snapshot-001\n" +
+		"      artifact: a\n" +
+		"    files:\n" +
+		"      - path: README.md\n" +
+		"        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
+		"  - key:\n" +
+		"      source:\n" +
+		"        type: file\n" +
+		"        name: two\n" +
+		"      resolved_version: local-snapshot-002\n" +
+		"      artifact: b\n" +
+		"    files:\n" +
+		"      - path: README.md\n" +
+		"        digest: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := store.LoadMaterializationRecord(context.Background(), root)
+	if err == nil {
+		t.Fatal("LoadMaterializationRecord() error = nil, want invalid_format error")
+	}
+	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorInvalidFormat)
 }

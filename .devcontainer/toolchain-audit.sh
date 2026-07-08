@@ -73,7 +73,6 @@ write_snapshot() {
   emit_line "tool.npm.path" "$(command_path_or_missing npm)"
   emit_line "tool.gh.path" "$(command_path_or_missing gh)"
   emit_line "tool.rg.path" "$(command_path_or_missing rg)"
-  emit_line "tool.docker.path" "$(command_path_or_missing docker)"
   emit_line "tool.pwsh.path" "$(command_path_or_missing pwsh)"
   emit_line "tool.pwsh_exe.path" "$(command_path_or_missing pwsh.exe)"
   emit_line "tool.just.path" "$(command_path_or_missing just)"
@@ -83,7 +82,6 @@ write_snapshot() {
   run_capture "npm_version" npm --version
   run_capture "gh_version" gh --version
   run_capture "rg_version" rg --version
-  run_capture "docker_version" docker --version
   run_capture "pwsh_version" pwsh --version
   run_capture "just_version" just --version
 

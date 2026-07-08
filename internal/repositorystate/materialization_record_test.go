@@ -165,3 +165,29 @@ func TestValidateMaterializationRecordRejectsDuplicateOwnersAndInvalidDigests(t 
 		t.Fatal("ValidateMaterializationRecord() error = nil, want invalid digest error")
 	}
 }
+
+func TestRemoveManagedArtifactDropsOnlyMatchingKey(t *testing.T) {
+	keep := ManagedArtifactRecord{
+		Key: ManagedArtifactKey{
+			Source:          SourceIdentity{Type: "file", Name: "two"},
+			ResolvedVersion: "local-snapshot-002",
+			Artifact:        "b",
+		},
+	}
+	remove := ManagedArtifactRecord{
+		Key: ManagedArtifactKey{
+			Source:          SourceIdentity{Type: "file", Name: "one"},
+			ResolvedVersion: "local-snapshot-001",
+			Artifact:        "a",
+		},
+	}
+
+	got := RemoveManagedArtifact(MaterializationRecord{
+		Artifacts: []ManagedArtifactRecord{remove, keep},
+	}, remove.Key)
+
+	want := MaterializationRecord{Artifacts: []ManagedArtifactRecord{keep}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RemoveManagedArtifact() = %#v, want %#v", got, want)
+	}
+}

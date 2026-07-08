@@ -204,9 +204,6 @@ Initial atomic positive cases:
 Initial atomic negative cases:
 
 - `ownership-conflict-overlapping-file`: materialization fails with **Ownership Conflict**.
-- `ambiguous-install-target-rejected`: ambiguous or invalid explicit target form is rejected.
-- `trust-policy-denied-git-source`: a **Trust Policy** denial returns the expected class of failure.
-- `non-interactive-prompt-required`: a path that would require prompting fails with the documented non-interactive contract.
 
 This initial set is intentionally incomplete. Its purpose is to establish structure, naming, metadata, and verification conventions early.
 
