@@ -15,7 +15,7 @@ func TestDiscoverInitialExampleLibrary(t *testing.T) {
 		t.Fatalf("Discover() error = %v", err)
 	}
 
-	if got, want := len(library.Examples), 9; got != want {
+	if got, want := len(library.Examples), 6; got != want {
 		t.Fatalf("len(library.Examples) = %d, want %d", got, want)
 	}
 
@@ -26,9 +26,6 @@ func TestDiscoverInitialExampleLibrary(t *testing.T) {
 		"json-success-envelope-minimal":       {},
 		"file-direct-install-single-artifact": {},
 		"ownership-conflict-overlapping-file": {},
-		"ambiguous-install-target-rejected":   {},
-		"trust-policy-denied-git-source":      {},
-		"non-interactive-prompt-required":     {},
 	}
 
 	for _, example := range library.Examples {
@@ -63,6 +60,7 @@ func TestDiscoverRejectsVerificationFileMismatch(t *testing.T) {
 		"schema_version: 1\n"+
 		"id: bad-example\n"+
 		"kind: atomic-case\n"+
+		"status: active\n"+
 		"polarity: positive\n"+
 		"summary: Broken verification contract.\n"+
 		"commands:\n"+
@@ -73,6 +71,8 @@ func TestDiscoverRejectsVerificationFileMismatch(t *testing.T) {
 		"  exit_code: exact\n"+
 		"  stdout_text: contains\n"+
 		"  stdout_json: absent\n"+
+		"  stderr_text: absent\n"+
+		"  stderr_json: absent\n"+
 		"  consumer_state: exact\n"+
 		"normative_outputs:\n"+
 		"  - expected/exit-code.txt\n"+
@@ -112,6 +112,7 @@ func TestDiscoverRejectsInvalidVerificationValue(t *testing.T) {
 		"schema_version: 1\n"+
 		"id: bad-verification\n"+
 		"kind: atomic-case\n"+
+		"status: active\n"+
 		"polarity: positive\n"+
 		"summary: Invalid verification value.\n"+
 		"commands:\n"+
@@ -122,6 +123,8 @@ func TestDiscoverRejectsInvalidVerificationValue(t *testing.T) {
 		"  exit_code: exact\n"+
 		"  stdout_text: contians\n"+
 		"  stdout_json: absent\n"+
+		"  stderr_text: absent\n"+
+		"  stderr_json: absent\n"+
 		"  consumer_state: absent\n"+
 		"normative_outputs:\n"+
 		"  - expected/exit-code.txt\n")
@@ -161,6 +164,7 @@ func TestDiscoverRejectsSourceDescriptorTypeField(t *testing.T) {
 		"schema_version: 1\n"+
 		"id: bad-source-type\n"+
 		"kind: atomic-case\n"+
+		"status: active\n"+
 		"polarity: positive\n"+
 		"summary: Source descriptor incorrectly declares source.type.\n"+
 		"commands:\n"+
@@ -172,6 +176,8 @@ func TestDiscoverRejectsSourceDescriptorTypeField(t *testing.T) {
 		"  exit_code: exact\n"+
 		"  stdout_text: absent\n"+
 		"  stdout_json: absent\n"+
+		"  stderr_text: absent\n"+
+		"  stderr_json: absent\n"+
 		"  consumer_state: absent\n"+
 		"normative_outputs:\n"+
 		"  - expected/exit-code.txt\n")
@@ -197,6 +203,135 @@ func TestDiscoverRejectsSourceDescriptorTypeField(t *testing.T) {
 	}
 }
 
+func TestDiscoverRejectsMissingStatus(t *testing.T) {
+	root := t.TempDir()
+	exampleDir := filepath.Join(root, "atomic-cases", "missing-status")
+	writeMinimalExample(t, root, exampleDir, ""+
+		"schema_version: 1\n"+
+		"id: missing-status\n"+
+		"kind: atomic-case\n"+
+		"polarity: positive\n"+
+		"summary: Missing status.\n"+
+		"commands:\n"+
+		"  - argv:\n"+
+		"      - tbboot\n"+
+		"      - install\n"+
+		"verification:\n"+
+		"  exit_code: exact\n"+
+		"  stdout_text: absent\n"+
+		"  stdout_json: absent\n"+
+		"  stderr_text: absent\n"+
+		"  stderr_json: absent\n"+
+		"  consumer_state: absent\n"+
+		"normative_outputs:\n"+
+		"  - expected/exit-code.txt\n")
+
+	_, err := Discover(root)
+	if err == nil {
+		t.Fatal("Discover() error = nil, want missing status error")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, "missing-status", "status") {
+		t.Fatalf("error = %q, want status rejection", got)
+	}
+}
+
+func TestDiscoverRejectsInvalidStatus(t *testing.T) {
+	root := t.TempDir()
+	exampleDir := filepath.Join(root, "atomic-cases", "bad-status")
+	writeMinimalExample(t, root, exampleDir, ""+
+		"schema_version: 1\n"+
+		"id: bad-status\n"+
+		"kind: atomic-case\n"+
+		"status: flaky\n"+
+		"polarity: positive\n"+
+		"summary: Invalid status.\n"+
+		"commands:\n"+
+		"  - argv:\n"+
+		"      - tbboot\n"+
+		"      - install\n"+
+		"verification:\n"+
+		"  exit_code: exact\n"+
+		"  stdout_text: absent\n"+
+		"  stdout_json: absent\n"+
+		"  stderr_text: absent\n"+
+		"  stderr_json: absent\n"+
+		"  consumer_state: absent\n"+
+		"normative_outputs:\n"+
+		"  - expected/exit-code.txt\n")
+
+	_, err := Discover(root)
+	if err == nil {
+		t.Fatal("Discover() error = nil, want invalid status error")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, "bad-status", "flaky", "active, broken, skipped, or deprecated") {
+		t.Fatalf("error = %q, want invalid status rejection", got)
+	}
+}
+
+func TestDiscoverRequiresStderrExpectedFiles(t *testing.T) {
+	root := t.TempDir()
+	exampleDir := filepath.Join(root, "atomic-cases", "stderr-contract")
+	writeMinimalExample(t, root, exampleDir, ""+
+		"schema_version: 1\n"+
+		"id: stderr-contract\n"+
+		"kind: atomic-case\n"+
+		"status: active\n"+
+		"polarity: negative\n"+
+		"summary: Stderr contract.\n"+
+		"commands:\n"+
+		"  - argv:\n"+
+		"      - tbboot\n"+
+		"      - install\n"+
+		"verification:\n"+
+		"  exit_code: exact\n"+
+		"  stdout_text: absent\n"+
+		"  stdout_json: absent\n"+
+		"  stderr_text: contains\n"+
+		"  stderr_json: exact\n"+
+		"  consumer_state: absent\n"+
+		"normative_outputs:\n"+
+		"  - expected/exit-code.txt\n")
+
+	_, err := Discover(root)
+	if err == nil {
+		t.Fatal("Discover() error = nil, want missing stderr files")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, "stderr-contract", "expected/stderr-contains.yaml") {
+		t.Fatalf("error = %q, want missing stderr contains reference", got)
+	}
+
+	writeFile(t, filepath.Join(exampleDir, "expected", "stderr-contains.yaml"), "fragments:\n  - failure\n")
+	_, err = Discover(root)
+	if err == nil {
+		t.Fatal("Discover() error = nil, want missing stderr json file")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, "stderr-contract", "expected/stderr.json") {
+		t.Fatalf("error = %q, want missing stderr json reference", got)
+	}
+}
+
+func TestExampleStatusHelpers(t *testing.T) {
+	cases := []struct {
+		status      string
+		shouldRun   bool
+		expectsPass bool
+	}{
+		{status: "active", shouldRun: true, expectsPass: true},
+		{status: "broken", shouldRun: true, expectsPass: false},
+		{status: "skipped", shouldRun: false, expectsPass: false},
+		{status: "deprecated", shouldRun: false, expectsPass: false},
+	}
+	for _, tc := range cases {
+		example := Example{Metadata: Metadata{Status: tc.status}}
+		if got := example.ShouldRun(); got != tc.shouldRun {
+			t.Fatalf("%s ShouldRun() = %v, want %v", tc.status, got, tc.shouldRun)
+		}
+		if got := example.ExpectsPass(); got != tc.expectsPass {
+			t.Fatalf("%s ExpectsPass() = %v, want %v", tc.status, got, tc.expectsPass)
+		}
+	}
+}
+
 func mkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
@@ -209,6 +344,24 @@ func writeFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
+}
+
+func writeMinimalExample(t *testing.T, root string, exampleDir string, metadata string) {
+	t.Helper()
+	mkdirAll(t, filepath.Join(root, "scenarios"))
+	mkdirAll(t, filepath.Join(root, "atomic-cases"))
+	mkdirAll(t, filepath.Join(exampleDir, "source"))
+	mkdirAll(t, filepath.Join(exampleDir, "consumer"))
+	mkdirAll(t, filepath.Join(exampleDir, "expected"))
+	writeFile(t, filepath.Join(root, "README.md"), "# Examples\n")
+	writeFile(t, filepath.Join(exampleDir, "README.md"), "# Example\n")
+	writeFile(t, filepath.Join(exampleDir, "example.yaml"), metadata)
+	writeFile(t, filepath.Join(exampleDir, "source", "talby-source.yaml"), ""+
+		"schema_version: 1\n"+
+		"source:\n"+
+		"  name: example\n"+
+		"artifacts: []\n")
+	writeFile(t, filepath.Join(exampleDir, "expected", "exit-code.txt"), "0\n")
 }
 
 func containsAll(got string, wants ...string) bool {

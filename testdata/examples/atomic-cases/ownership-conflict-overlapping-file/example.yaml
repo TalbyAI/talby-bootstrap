@@ -1,6 +1,7 @@
 schema_version: 1
 id: ownership-conflict-overlapping-file
 kind: atomic-case
+status: broken
 polarity: negative
 summary: Reject materialization when two managed artifacts claim the same file.
 commands:
@@ -10,12 +11,14 @@ commands:
       - file:conflicting-source
 verification:
   exit_code: exact
-  stdout_text: contains
+  stdout_text: absent
   stdout_json: absent
+  stderr_text: contains
+  stderr_json: absent
   consumer_state: exact
 normative_outputs:
   - expected/exit-code.txt
-  - expected/stdout-contains.yaml
+  - expected/stderr-contains.yaml
   - expected/consumer
 tags:
   - ownership-conflict

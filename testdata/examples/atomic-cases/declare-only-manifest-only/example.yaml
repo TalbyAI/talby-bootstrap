@@ -1,6 +1,7 @@
 schema_version: 1
 id: declare-only-manifest-only
 kind: atomic-case
+status: active
 polarity: positive
 summary: Declare one artifact without changing the lockfile or materialized files.
 commands:
@@ -15,6 +16,8 @@ verification:
   exit_code: exact
   stdout_text: contains
   stdout_json: absent
+  stderr_text: absent
+  stderr_json: absent
   consumer_state: exact
 normative_outputs:
   - expected/exit-code.txt

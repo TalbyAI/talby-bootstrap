@@ -1,1 +1,1 @@
-declared source file:local-example-source without materializing artifacts
+declared artifact base-readme from local-example-source

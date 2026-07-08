@@ -19,10 +19,19 @@ type Example struct {
 	Metadata Metadata
 }
 
+func (e Example) ShouldRun() bool {
+	return e.Metadata.Status == "active" || e.Metadata.Status == "broken"
+}
+
+func (e Example) ExpectsPass() bool {
+	return e.Metadata.Status == "active"
+}
+
 type Metadata struct {
 	SchemaVersion   int          `yaml:"schema_version"`
 	ID              string       `yaml:"id"`
 	Kind            string       `yaml:"kind"`
+	Status          string       `yaml:"status"`
 	Polarity        string       `yaml:"polarity"`
 	Summary         string       `yaml:"summary"`
 	Commands        []Command    `yaml:"commands"`
@@ -39,6 +48,8 @@ type Verification struct {
 	ExitCode      string `yaml:"exit_code"`
 	StdoutText    string `yaml:"stdout_text"`
 	StdoutJSON    string `yaml:"stdout_json"`
+	StderrText    string `yaml:"stderr_text"`
+	StderrJSON    string `yaml:"stderr_json"`
 	ConsumerState string `yaml:"consumer_state"`
 }
 
@@ -78,6 +89,10 @@ func Discover(root string) (Library, error) {
 }
 
 func loadExample(path string, parentGroup string) (Example, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return Example{}, fmt.Errorf("resolve %s: %w", path, err)
+	}
 	if err := requireFile(path, "README.md"); err != nil {
 		return Example{}, err
 	}
@@ -111,7 +126,7 @@ func loadExample(path string, parentGroup string) (Example, error) {
 	}
 
 	return Example{
-		Path:     path,
+		Path:     absPath,
 		Metadata: meta,
 	}, nil
 }
@@ -128,6 +143,9 @@ func validateMetadata(path string, parentGroup string, meta Metadata) error {
 	}
 	if meta.Kind != singularKind(parentGroup) {
 		return fmt.Errorf("%s: kind = %q, want %q", meta.ID, meta.Kind, singularKind(parentGroup))
+	}
+	if !isOneOf(meta.Status, "active", "broken", "skipped", "deprecated") {
+		return fmt.Errorf("%s: status = %q, want active, broken, skipped, or deprecated", meta.ID, meta.Status)
 	}
 	switch meta.Polarity {
 	case "positive", "negative":
@@ -177,6 +195,12 @@ func validateVerification(exampleID string, verification Verification) error {
 	if !isOneOf(verification.StdoutJSON, "exact", "contains", "absent") {
 		return fmt.Errorf("%s: verification.stdout_json = %q, want exact, contains, or absent", exampleID, verification.StdoutJSON)
 	}
+	if !isOneOf(verification.StderrText, "exact", "contains", "absent") {
+		return fmt.Errorf("%s: verification.stderr_text = %q, want exact, contains, or absent", exampleID, verification.StderrText)
+	}
+	if !isOneOf(verification.StderrJSON, "exact", "contains", "absent") {
+		return fmt.Errorf("%s: verification.stderr_json = %q, want exact, contains, or absent", exampleID, verification.StderrJSON)
+	}
 	if !isOneOf(verification.ConsumerState, "exact", "absent") {
 		return fmt.Errorf("%s: verification.consumer_state = %q, want exact or absent", exampleID, verification.ConsumerState)
 	}
@@ -220,6 +244,20 @@ func expectedOutputsForVerification(v Verification) []string {
 		outputs = append(outputs, "expected/stdout.json")
 	case "contains":
 		outputs = append(outputs, "expected/stdout-json-contains.yaml")
+	}
+
+	switch v.StderrText {
+	case "exact":
+		outputs = append(outputs, "expected/stderr.txt")
+	case "contains":
+		outputs = append(outputs, "expected/stderr-contains.yaml")
+	}
+
+	switch v.StderrJSON {
+	case "exact":
+		outputs = append(outputs, "expected/stderr.json")
+	case "contains":
+		outputs = append(outputs, "expected/stderr-json-contains.yaml")
 	}
 
 	if v.ConsumerState == "exact" {

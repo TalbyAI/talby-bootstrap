@@ -1,0 +1,11 @@
+schema_version: 1
+artifacts:
+  - key:
+      source:
+        type: file
+        name: local-example-source
+      resolved_version: local-snapshot-03cab323e9b749253e407d73a49bd39e833a268bb4b8507266acf28b3d69df4a
+      artifact: base-readme
+    files:
+      - path: README.md
+        digest: 0433bc38298832688ce91714430a166f2c060d75380590c14563ef3ddff8ab95
