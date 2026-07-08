@@ -303,13 +303,10 @@ Expected: failure because the real example YAML files do not have `status`, `std
 
 - Modify: `testdata/examples/scenarios/file-direct-install-multi-artifact/example.yaml`
 - Modify: `testdata/examples/scenarios/declare-only-flow/example.yaml`
-- Modify: `testdata/examples/atomic-cases/ambiguous-install-target-rejected/example.yaml`
 - Modify: `testdata/examples/atomic-cases/declare-only-manifest-only/example.yaml`
 - Modify: `testdata/examples/atomic-cases/file-direct-install-single-artifact/example.yaml`
 - Modify: `testdata/examples/atomic-cases/json-success-envelope-minimal/example.yaml`
-- Modify: `testdata/examples/atomic-cases/non-interactive-prompt-required/example.yaml`
 - Modify: `testdata/examples/atomic-cases/ownership-conflict-overlapping-file/example.yaml`
-- Modify: `testdata/examples/atomic-cases/trust-policy-denied-git-source/example.yaml`
 
 **Interfaces:**
 
@@ -332,12 +329,9 @@ Use these rules:
   - negative JSON-mode examples, if any are added later, must verify the JSON error envelope on `stderr_json`, not `stdout_json`.
 - leave `stdout_*` verification in place only for examples that actually write their contract to `stdout`.
 
-At minimum, inspect and update these current negative examples to use the correct stream:
+At minimum, inspect and update the current negative example to use the correct stream:
 
-- `testdata/examples/atomic-cases/ambiguous-install-target-rejected/`
-- `testdata/examples/atomic-cases/non-interactive-prompt-required/`
 - `testdata/examples/atomic-cases/ownership-conflict-overlapping-file/`
-- `testdata/examples/atomic-cases/trust-policy-denied-git-source/`
 
 - [ ] **Step 2: Update JSON success expected output only if the current fixture is stale**
 

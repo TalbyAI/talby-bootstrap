@@ -213,12 +213,12 @@ The first implementation batch should do only the following:
 1. add `status` to the example metadata schema and validation;
 2. add `stderr_text` and `stderr_json` to the example metadata schema and validation;
 3. update every current `example.yaml` to declare one of the four allowed statuses and the stderr verification policy;
-4. add one CLI-side end-to-end runner that discovers the whole example library;
+4. add one CLI-side end-to-end runner that discovers the current example library;
 5. execute `active` and `broken` examples;
 6. skip `skipped` and `deprecated` examples;
 7. support only the install-oriented command shapes already present in the current example set, including `file:<alias>` source normalization.
 
-This is enough to make the whole example library visible to `go test` immediately while preserving incremental development.
+This is enough to make the current example library visible to `go test` immediately while preserving incremental development.
 
 ## Maintenance rules
 
@@ -236,7 +236,7 @@ These rules make the example library function as both documentation and executio
 ## Consequences
 
 - `testdata/examples/` becomes the executable contract for more of the CLI surface.
-- The suite gains visibility into all examples immediately, even when some features are not implemented yet.
+- The suite gains visibility into the current example library immediately, even when some features are not implemented yet.
 - The `broken` status supports red-green development without hiding unfinished work.
 - The first runner stays small by reusing existing loader code and existing in-process CLI execution patterns.
 
