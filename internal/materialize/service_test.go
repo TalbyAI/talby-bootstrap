@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
@@ -76,6 +77,56 @@ func TestApplyLeavesIdenticalFileUnchanged(t *testing.T) {
 	}
 	if len(result.Changes) != 1 || result.Changes[0].Action != "unchanged" {
 		t.Fatalf("Changes = %#v, want one unchanged change", result.Changes)
+	}
+}
+
+func TestApplyUpdatesTrackedFileWhenDigestMatchesRecordedState(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "source.txt")
+	if err := os.WriteFile(sourcePath, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	result, err := Apply(context.Background(), Request{
+		Root: root,
+		Key: repositorystate.ManagedArtifactKey{
+			Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
+			ResolvedVersion: "local-snapshot-001",
+			Artifact:        "base-readme",
+		},
+		Record: repositorystate.MaterializationRecord{
+			Artifacts: []repositorystate.ManagedArtifactRecord{{
+				Key: repositorystate.ManagedArtifactKey{
+					Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
+					ResolvedVersion: "local-snapshot-001",
+					Artifact:        "base-readme",
+				},
+				Files: []repositorystate.ManagedFileRecord{{
+					Path:   "README.md",
+					Digest: "01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee",
+				}},
+			}},
+		},
+		Artifact: source.ArtifactDescriptor{
+			Name: "base-readme",
+			Steps: []source.MaterializationStep{{
+				Type:       "file",
+				TargetPath: "README.md",
+				SourcePath: sourcePath,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if len(result.Changes) != 1 || result.Changes[0].Action != "updated" {
+		t.Fatalf("Changes = %#v, want one updated change", result.Changes)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "README.md")); err != nil || string(got) != "hello\n" {
+		t.Fatalf("ReadFile(README.md) = %q, %v, want hello", got, err)
 	}
 }
 
@@ -168,6 +219,9 @@ func TestApplyStopsWhenTrackedFileHasDrifted(t *testing.T) {
 	var drift DriftError
 	if !errors.As(err, &drift) {
 		t.Fatalf("error = %T, want DriftError", err)
+	}
+	if !strings.Contains(err.Error(), "README.md") {
+		t.Fatalf("error = %q, want path in message", err)
 	}
 }
 

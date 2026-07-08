@@ -3,6 +3,7 @@ package examples
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -370,6 +371,83 @@ func TestExampleStatusHelpers(t *testing.T) {
 		if got := example.ExpectsPass(); got != tc.expectsPass {
 			t.Fatalf("%s ExpectsPass() = %v, want %v", tc.status, got, tc.expectsPass)
 		}
+	}
+}
+
+func TestExpectedOutputsForVerificationMapsContractsToFiles(t *testing.T) {
+	got := expectedOutputsForVerification(Verification{
+		StdoutText:    "contains",
+		StdoutJSON:    "exact",
+		StderrText:    "exact",
+		StderrJSON:    "contains",
+		ConsumerState: "exact",
+	})
+	want := []string{
+		"expected/stdout-contains.yaml",
+		"expected/stdout.json",
+		"expected/stderr.txt",
+		"expected/stderr-json-contains.yaml",
+		"expected/consumer",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expectedOutputsForVerification() = %#v, want %#v", got, want)
+	}
+}
+
+func TestValidateMetadataRejectsEmptyCommandArgv(t *testing.T) {
+	root := t.TempDir()
+	mkdirAll(t, filepath.Join(root, "expected"))
+	writeFile(t, filepath.Join(root, "expected", "exit-code.txt"), "0\n")
+
+	err := validateMetadata(root, "atomic-cases", Metadata{
+		SchemaVersion: 1,
+		ID:            filepath.Base(root),
+		Kind:          "atomic-case",
+		Status:        "active",
+		Polarity:      "positive",
+		Summary:       "summary",
+		Commands:      []Command{{}},
+		Verification: Verification{
+			ExitCode:      "exact",
+			StdoutText:    "absent",
+			StdoutJSON:    "absent",
+			StderrText:    "absent",
+			StderrJSON:    "absent",
+			ConsumerState: "absent",
+		},
+	})
+	if err == nil {
+		t.Fatal("validateMetadata() error = nil, want empty argv error")
+	}
+	if got := err.Error(); !containsAll(got, filepath.Base(root), "command argv must not be empty") {
+		t.Fatalf("error = %q, want empty argv rejection", got)
+	}
+}
+
+func TestValidateSourceDescriptorRejectsInvalidYAML(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "talby-source.yaml")
+	writeFile(t, path, "source: [\n")
+
+	err := validateSourceDescriptor(path, "bad-source")
+	if err == nil {
+		t.Fatal("validateSourceDescriptor() error = nil, want parse error")
+	}
+	if got := err.Error(); !containsAll(got, "bad-source", "parse", "talby-source.yaml") {
+		t.Fatalf("error = %q, want wrapped parse error", got)
+	}
+}
+
+func TestRequireFileAndDirRejectWrongTypes(t *testing.T) {
+	root := t.TempDir()
+	mkdirAll(t, filepath.Join(root, "dir"))
+	writeFile(t, filepath.Join(root, "file.txt"), "x")
+
+	if err := requireFile(root, "dir"); err == nil || !strings.Contains(err.Error(), "expected file") {
+		t.Fatalf("requireFile() error = %v, want expected file error", err)
+	}
+	if err := requireDir(root, "file.txt"); err == nil || !strings.Contains(err.Error(), "expected directory") {
+		t.Fatalf("requireDir() error = %v, want expected directory error", err)
 	}
 }
 

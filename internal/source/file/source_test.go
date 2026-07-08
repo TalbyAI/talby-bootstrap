@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -48,6 +49,19 @@ func TestResolveLoadsSourceIdentityAndArtifacts(t *testing.T) {
 	}
 	if got := resolved.Artifacts[0].Steps[0]; got.TargetPath != "README.md" || !strings.HasSuffix(got.SourcePath, "/artifacts/base-readme/README.md") {
 		t.Fatalf("Artifacts[0].Steps[0] = %#v, want resolved whole-file source path", got)
+	}
+}
+
+func TestCapabilitiesDescribeLocalFileSource(t *testing.T) {
+	got := New().Capabilities()
+	want := source.Capabilities{
+		SupportsVersions:   false,
+		ProvidesIdentity:   true,
+		ProvidesTimestamp:  false,
+		EnumeratesVersions: false,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Capabilities() = %#v, want %#v", got, want)
 	}
 }
 
