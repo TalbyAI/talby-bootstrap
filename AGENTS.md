@@ -58,4 +58,6 @@ Do not commit local secrets, keys, `.env` files, or generated local state. `.git
 
 Agents should use the `caveman` skill by default for responses unless the user explicitly asks for normal verbosity or a task requires fuller explanation.
 
+During brainstorming, a request for context, implications, examples, or trade-offs does not answer the current question. Answer the clarification, then restate the same question and wait for an explicit decision. Do not advance to another design question while the current one remains unanswered.
+
 Agents must not create commits without asking the user for confirmation at that moment and receiving an explicit approval. Prior general permission is not enough; the agent must pause, state that it intends to create a commit, and wait for a clear user confirmation before running the commit. Agents may still suggest concise commit messages when helpful.

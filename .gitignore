@@ -15,6 +15,7 @@
 
 # Temporary files
 .tmp-*
+tmp/
 
 # Coverage artifacts
 coverage.out
