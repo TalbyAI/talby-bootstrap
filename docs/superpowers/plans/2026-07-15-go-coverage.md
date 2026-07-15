@@ -34,11 +34,11 @@
 
 ```go
 func TestLockfileSnapshotAndKeepArtifacts(t *testing.T) {
-	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
-	lock := Lockfile{Resolutions: []Resolution{{Source: source, ResolvedVersion: "v1", Artifacts: []ArtifactResolution{{Name: "b", Version: "1"}, {Name: "a", Version: "1"}}}}}
-	if _, ok := lock.Snapshot(SnapshotKey{Source: source, ResolvedVersion: "v1"}); !ok { t.Fatal("snapshot not found") }
-	kept, removed := lock.KeepArtifacts(map[ArtifactKey]struct{}{{Source: source, Name: "a"}: {}})
-	if len(kept.Resolutions) != 1 || len(kept.Resolutions[0].Artifacts) != 1 || len(removed) != 1 { t.Fatalf("kept=%#v removed=%#v", kept, removed) }
+    source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+    lock := Lockfile{Resolutions: []Resolution{{Source: source, ResolvedVersion: "v1", Artifacts: []ArtifactResolution{{Name: "b", Version: "1"}, {Name: "a", Version: "1"}}}}}
+    if _, ok := lock.Snapshot(SnapshotKey{Source: source, ResolvedVersion: "v1"}); !ok { t.Fatal("snapshot not found") }
+    kept, removed := lock.KeepArtifacts(map[ArtifactKey]struct{}{{Source: source, Name: "a"}: {}})
+    if len(kept.Resolutions) != 1 || len(kept.Resolutions[0].Artifacts) != 1 || len(removed) != 1 { t.Fatalf("kept=%#v removed=%#v", kept, removed) }
 }
 ```
 
@@ -67,9 +67,9 @@ Expected: PASS.
 
 ```go
 func TestStoreRoundTripsRepositoryState(t *testing.T) {
-	ctx, root, store := context.Background(), t.TempDir(), NewStore()
-	// Build one valid value of each state type, write it, load it, and compare with reflect.DeepEqual.
-	// Use a relative file Source locator rooted under root and a 64-character lowercase digest.
+    ctx, root, store := context.Background(), t.TempDir(), NewStore()
+    // Build one valid value of each state type, write it, load it, and compare with reflect.DeepEqual.
+    // Use a relative file Source locator rooted under root and a 64-character lowercase digest.
 }
 ```
 
@@ -98,11 +98,11 @@ Expected: PASS and package coverage materially above 62.8%.
 
 ```go
 func TestDigestAndRevalidate(t *testing.T) {
-	root := t.TempDir()
-	observed, err := Observe(root, "file")
-	if err != nil { t.Fatal(err) }
-	if Digest([]byte("content")) == "" { t.Fatal("empty digest") }
-	if err := Revalidate(observed); err != nil { t.Fatal(err) }
+    root := t.TempDir()
+    observed, err := Observe(root, "file")
+    if err != nil { t.Fatal(err) }
+    if Digest([]byte("content")) == "" { t.Fatal("empty digest") }
+    if err := Revalidate(observed); err != nil { t.Fatal(err) }
 }
 ```
 
