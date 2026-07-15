@@ -2,6 +2,7 @@ package repositorystate
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -18,6 +19,10 @@ func NormalizeSourceIdentity(root string, source SourceIdentity) (SourceIdentity
 	if err != nil {
 		return SourceIdentity{}, err
 	}
+	base, err = filepath.EvalSymlinks(base)
+	if err != nil {
+		return SourceIdentity{}, err
+	}
 	path := source.Locator
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(base, path)
@@ -27,6 +32,12 @@ func NormalizeSourceIdentity(root string, source SourceIdentity) (SourceIdentity
 		return SourceIdentity{}, err
 	}
 	path = filepath.Clean(path)
+	canonical, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		path = canonical
+	} else if !os.IsNotExist(err) {
+		return SourceIdentity{}, err
+	}
 	rel, err := filepath.Rel(base, path)
 	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		path = rel

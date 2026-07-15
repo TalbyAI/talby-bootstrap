@@ -110,11 +110,17 @@ func writeResult(stdout io.Writer, result installsvc.Result) error {
 	}
 	for _, change := range result.Changes {
 		fields := []string{string(change.Kind), change.Source.Type + ":" + change.Source.Locator}
+		if change.SourceVersion != "" {
+			fields = append(fields, "source_version="+change.SourceVersion)
+		}
 		if change.Artifact != "" {
 			fields = append(fields, change.Artifact)
 		}
 		if change.Path != "" {
 			fields = append(fields, change.Path)
+		}
+		if change.OwnershipKind != "" {
+			fields = append(fields, "ownership_kind="+string(change.OwnershipKind))
 		}
 		if _, err := fmt.Fprintln(stdout, strings.Join(fields, " ")); err != nil {
 			return err

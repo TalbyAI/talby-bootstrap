@@ -1,6 +1,8 @@
 package repositorystate
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,6 +24,17 @@ func TestNormalizeSourceIdentityStoresRootRelativeAndExternalAbsoluteLocators(t 
 	out, err := NormalizeSourceIdentity(root, SourceIdentity{Type: "file", Locator: "/tmp/outside"})
 	if err != nil || out.Locator != "/tmp/outside" {
 		t.Fatalf("external = %#v, %v", out, err)
+	}
+}
+func TestNormalizeSourceIdentityCanonicalizesSymlinkContainment(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(root, "linked")); err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+	got, err := NormalizeSourceIdentity(root, SourceIdentity{Type: "file", Locator: "linked"})
+	if err != nil || got.Locator != filepath.ToSlash(external) {
+		t.Fatalf("NormalizeSourceIdentity() = %#v, %v, want external canonical locator", got, err)
 	}
 }
 func TestValidateManifestRejectsMismatchedPreservedLocator(t *testing.T) {

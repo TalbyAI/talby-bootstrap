@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/talby/talby-bootstrap/internal/app"
+	installsvc "github.com/talby/talby-bootstrap/internal/install"
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
 )
 
@@ -100,6 +101,36 @@ func TestSyncJSONIncludesTypedEffectiveChanges(t *testing.T) {
 			t.Fatalf("changes = %#v", envelope.Details["changes"])
 		}
 	})
+}
+
+func TestChangeProvenanceInHumanAndJSONOutput(t *testing.T) {
+	change := installsvc.Change{
+		Kind:          installsvc.ChangeFileCreated,
+		Source:        repositorystate.SourceIdentity{Type: "file", Locator: "source"},
+		SourceVersion: "snapshot",
+		Artifact:      "a",
+		Path:          "a.txt",
+		OwnershipKind: installsvc.OwnershipWholeFile,
+	}
+	result := installsvc.Result{Operation: "sync", Outcome: installsvc.OutcomeApplied, ArtifactCount: 1, Changes: []installsvc.Change{change}}
+	var human bytes.Buffer
+	if err := writeResult(&human, result); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"source_version=snapshot", "ownership_kind=whole_file"} {
+		if !strings.Contains(human.String(), want) {
+			t.Fatalf("human output = %q, want %q", human.String(), want)
+		}
+	}
+	data, err := json.Marshal(resultEnvelope("sync succeeded", result))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"source_version":"snapshot"`, `"ownership_kind":"whole_file"`} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("JSON = %s, want %s", data, want)
+		}
+	}
 }
 
 func TestSyncJSONIncludesAllTypedConflictsOnStderr(t *testing.T) {

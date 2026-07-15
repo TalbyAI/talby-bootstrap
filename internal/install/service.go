@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
 	"github.com/talby/talby-bootstrap/internal/source"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -36,11 +37,17 @@ const (
 	ChangeLockPruned       ChangeKind = "lock_pruned"
 )
 
+type OwnershipKind string
+
+const OwnershipWholeFile OwnershipKind = "whole_file"
+
 type Change struct {
-	Kind     ChangeKind                     `json:"kind"`
-	Source   repositorystate.SourceIdentity `json:"source"`
-	Artifact string                         `json:"artifact,omitempty"`
-	Path     string                         `json:"path,omitempty"`
+	Kind          ChangeKind                     `json:"kind"`
+	Source        repositorystate.SourceIdentity `json:"source"`
+	SourceVersion string                         `json:"source_version,omitempty"`
+	Artifact      string                         `json:"artifact,omitempty"`
+	Path          string                         `json:"path,omitempty"`
+	OwnershipKind OwnershipKind                  `json:"ownership_kind,omitempty"`
 }
 type ConflictKind string
 
@@ -195,7 +202,7 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 			return Result{}, err
 		}
 		if change != repositorystate.ChangeKindUnchanged {
-			prepared.Changes = append(prepared.Changes, Change{Kind: ChangeResolutionLocked, Source: identity, Artifact: request.Artifact})
+			prepared.Changes = append(prepared.Changes, Change{Kind: ChangeResolutionLocked, Source: identity, SourceVersion: resolved.Identity.Version, Artifact: request.Artifact})
 		}
 	}
 	if kind == repositorystate.ChangeKindInserted {
@@ -259,7 +266,7 @@ func approved(policy repositorystate.TrustPolicy, source repositorystate.SourceI
 	return false
 }
 func outsideRoot(identity repositorystate.SourceIdentity) bool {
-	return strings.HasPrefix(identity.Locator, "/")
+	return filepath.IsAbs(filepath.FromSlash(identity.Locator))
 }
 func resultForConflicts(operation string, count int, conflicts []Conflict) Result {
 	return Result{Operation: operation, Outcome: OutcomeConflict, ArtifactCount: count, Conflicts: conflicts}

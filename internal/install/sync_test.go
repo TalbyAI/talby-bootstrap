@@ -64,10 +64,50 @@ func TestSyncFirstResolutionLocksDeclaration(t *testing.T) {
 		t.Fatalf("Sync() = %#v, %v", got, err)
 	}
 }
+func TestSyncChangesIncludeProvenance(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+	result, err := service.Sync(context.Background(), SyncRequest{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range result.Changes {
+		if change.Kind == ChangeFileCreated {
+			if change.SourceVersion != "snapshot" || change.OwnershipKind != OwnershipWholeFile {
+				t.Fatalf("file change = %#v, want complete provenance", change)
+			}
+			return
+		}
+	}
+	t.Fatalf("changes = %#v, want file_created", result.Changes)
+}
 func TestSyncReplaysExactArtifactResolution(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root, artifactDeclaration("a"))
 	service, _ := testService(testResolved(testArtifact("a", "a")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil || got.Outcome != OutcomeNoOp {
+		t.Fatalf("replay = %#v, %v", got, err)
+	}
+}
+func TestSyncReplaysArtifactDeclarationsFromMergedSnapshot(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"), artifactDeclaration("b"))
+	service, _ := testService(testResolved(testArtifact("a", "a"), testArtifact("b", "b")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil || got.Outcome != OutcomeNoOp {
+		t.Fatalf("replay = %#v, %v", got, err)
+	}
+}
+func TestSyncReplaysCanonicallyEquivalentTargetPath(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	service, _ := testService(testResolved(testArtifact("a", "./foo")))
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
 		t.Fatal(err)
 	}
@@ -219,6 +259,37 @@ func TestSyncRevalidatesAdoptedFileBeforePersistence(t *testing.T) {
 	var changed materialize.ChangedSincePreflightError
 	if !errors.As(err, &changed) {
 		t.Fatalf("revalidateAdoptions() error = %T %v", err, err)
+	}
+}
+func TestPersistPreparedClassifiesWriteRaceAsDrift(t *testing.T) {
+	root := t.TempDir()
+	observed, err := materialize.Observe(root, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "target"), []byte("raced"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	artifact := desiredArtifact{
+		Key:             repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Name: "a"},
+		Resolution:      repositorystate.ArtifactResolution{Name: "a", Version: "1"},
+		ResolvedVersion: "snapshot",
+		Descriptor:      testArtifact("a", "target"),
+	}
+	prepared := preparedOperation{
+		Desired: []desiredArtifact{artifact},
+		Files: []plannedFile{{
+			Artifact: artifact,
+			Step:     artifact.Descriptor.Steps[0],
+			Observed: observed,
+			Digest:   materialize.Digest([]byte("a")),
+			Change:   ChangeFileCreated,
+		}},
+	}
+	_, err = (Service{}).persistPrepared(context.Background(), root, "sync", prepared, nil)
+	var conflict UserActionError
+	if !errors.As(err, &conflict) || len(conflict.Result.Conflicts) != 1 || conflict.Result.Conflicts[0].Kind != ConflictDrift || conflict.Result.Conflicts[0].Source != artifact.Key.Source || conflict.Result.Conflicts[0].Artifact != artifact.Key.Name || conflict.Result.Conflicts[0].Paths[0] != "target" {
+		t.Fatalf("persistPrepared() error = %T %v, want target drift", err, err)
 	}
 }
 func TestSyncReportsMissingManagedFileAsDrift(t *testing.T) {

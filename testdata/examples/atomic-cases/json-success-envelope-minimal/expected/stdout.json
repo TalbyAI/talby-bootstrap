@@ -12,6 +12,7 @@
           "type": "file",
           "locator": ".tbboot-example/sources/local-example-source"
         },
+        "source_version": "local-snapshot-e530234a73a5f3a97305bb38e0d405d8cfa484f7b0ca60972b1e736bd0b4e7f8",
         "artifact": "base-readme"
       },
       {
@@ -28,8 +29,10 @@
           "type": "file",
           "locator": ".tbboot-example/sources/local-example-source"
         },
+        "source_version": "local-snapshot-e530234a73a5f3a97305bb38e0d405d8cfa484f7b0ca60972b1e736bd0b4e7f8",
         "artifact": "base-readme",
-        "path": "README.md"
+        "path": "README.md",
+        "ownership_kind": "whole_file"
       }
     ]
   }

@@ -8,6 +8,7 @@ import (
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
 	"github.com/talby/talby-bootstrap/internal/source"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -89,7 +90,7 @@ func (service Service) prepare(ctx context.Context, root string, manifest reposi
 			}
 			prepared.Lockfile = next
 			if change != repositorystate.ChangeKindUnchanged {
-				prepared.Changes = append(prepared.Changes, Change{Kind: ChangeResolutionLocked, Source: d.Source, Artifact: d.Target.Artifact})
+				prepared.Changes = append(prepared.Changes, Change{Kind: ChangeResolutionLocked, Source: d.Source, SourceVersion: maybe.ResolvedVersion, Artifact: d.Target.Artifact})
 			}
 		}
 	}
@@ -172,7 +173,7 @@ func verifyLocked(d repositorystate.Declaration, locked repositorystate.Resoluti
 	if err != nil {
 		return nil, err
 	}
-	if len(selected) != len(locked.Artifacts) {
+	if d.Target.Scope == repositorystate.DeclarationScopeSource && len(selected) != len(locked.Artifacts) {
 		return nil, fmt.Errorf("locked artifact set no longer matches current source")
 	}
 	versions := map[string]string{}
@@ -197,25 +198,15 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 	var conflicts []Conflict
 	claimed := map[string]desiredArtifact{}
 	for _, artifact := range desired {
-		if managed, ok := record.Artifact(artifact.Key); ok {
+		managed, isManaged := record.Artifact(artifact.Key)
+		if isManaged {
 			if managed.ResolvedVersion != artifact.ResolvedVersion || managed.ArtifactVersion != artifact.Resolution.Version {
 				return nil, nil, fmt.Errorf("managed artifact version does not match desired resolution")
 			}
-			expected := map[string]struct{}{}
-			for _, step := range artifact.Descriptor.Steps {
-				expected[step.TargetPath] = struct{}{}
-			}
-			if len(expected) != len(managed.Files) {
-				return nil, nil, fmt.Errorf("managed artifact path set does not match desired artifact")
-			}
-			for _, file := range managed.Files {
-				if _, ok := expected[file.Path]; !ok {
-					return nil, nil, fmt.Errorf("managed artifact path set does not match desired artifact")
-				}
-			}
 		}
-		seen := map[string]struct{}{}
-		for _, step := range artifact.Descriptor.Steps {
+		observations := make([]materialize.Observation, len(artifact.Descriptor.Steps))
+		expected := map[string]struct{}{}
+		for i, step := range artifact.Descriptor.Steps {
 			if step.Type != "file" {
 				return nil, nil, fmt.Errorf("unsupported step type %q", step.Type)
 			}
@@ -223,11 +214,26 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 			if err != nil {
 				return nil, nil, err
 			}
-			path := materialize.PathKey(observed.AbsolutePath)
-			if _, ok := seen[path]; ok {
+			path := materialize.PathKey(filepath.FromSlash(observed.Path))
+			if _, ok := expected[path]; ok {
 				return nil, nil, fmt.Errorf("duplicate desired target %q", step.TargetPath)
 			}
-			seen[path] = struct{}{}
+			expected[path] = struct{}{}
+			observations[i] = observed
+		}
+		if isManaged {
+			if len(expected) != len(managed.Files) {
+				return nil, nil, fmt.Errorf("managed artifact path set does not match desired artifact")
+			}
+			for _, file := range managed.Files {
+				if _, ok := expected[materialize.PathKey(filepath.FromSlash(file.Path))]; !ok {
+					return nil, nil, fmt.Errorf("managed artifact path set does not match desired artifact")
+				}
+			}
+		}
+		for i, step := range artifact.Descriptor.Steps {
+			observed := observations[i]
+			path := materialize.PathKey(observed.AbsolutePath)
 			for _, name := range []string{repositorystate.ManifestFileName, repositorystate.LockfileFileName, repositorystate.MaterializationRecordFileName} {
 				if observed.Path == name {
 					return nil, nil, fmt.Errorf("target %q is reserved", step.TargetPath)
@@ -308,7 +314,8 @@ func prepareSyncUndesired(root string, desired []desiredArtifact, lock repositor
 	changes := make([]Change, 0, len(removed))
 	for _, key := range removed {
 		if _, managed := record.Artifact(key); !managed {
-			changes = append(changes, Change{Kind: ChangeLockPruned, Source: key.Source, Artifact: key.Name})
+			resolution, _, _ := lock.Artifact(key)
+			changes = append(changes, Change{Kind: ChangeLockPruned, Source: key.Source, SourceVersion: resolution.ResolvedVersion, Artifact: key.Name})
 		}
 	}
 	return next, changes, conflicts, nil
@@ -332,7 +339,7 @@ func applyPrepared(root string, prepared preparedOperation) (repositorystate.Mat
 		}
 		byArtifact[file.Artifact.Key] = append(byArtifact[file.Artifact.Key], repositorystate.ManagedFileRecord{Path: file.Observed.Path, Digest: file.Digest})
 		if file.Change != "" {
-			changes = append(changes, Change{Kind: file.Change, Source: file.Artifact.Key.Source, Artifact: file.Artifact.Key.Name, Path: file.Observed.Path})
+			changes = append(changes, Change{Kind: file.Change, Source: file.Artifact.Key.Source, SourceVersion: file.Artifact.ResolvedVersion, Artifact: file.Artifact.Key.Name, Path: file.Observed.Path, OwnershipKind: OwnershipWholeFile})
 		}
 	}
 	for _, d := range prepared.Desired {
@@ -361,15 +368,22 @@ func revalidateAdoptions(files []plannedFile) error {
 }
 func (service Service) persistPrepared(ctx context.Context, root, operation string, prepared preparedOperation, manifest *repositorystate.Manifest) (Result, error) {
 	record, changes, created, err := applyPrepared(root, prepared)
-	if err != nil {
-		cleanup(created)
-		return Result{}, err
+	if err == nil {
+		err = revalidateAdoptions(prepared.Files)
 	}
-	if err := revalidateAdoptions(prepared.Files); err != nil {
+	if err != nil {
 		cleanup(created)
 		var changed materialize.ChangedSincePreflightError
 		if errors.As(err, &changed) {
-			result := resultForConflicts(operation, len(prepared.Desired), []Conflict{{Kind: ConflictDrift, Paths: []string{changed.Path}}})
+			conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
+			for _, file := range prepared.Files {
+				if file.Observed.Path == changed.Path {
+					conflict.Source = file.Artifact.Key.Source
+					conflict.Artifact = file.Artifact.Key.Name
+					break
+				}
+			}
+			result := resultForConflicts(operation, len(prepared.Desired), []Conflict{conflict})
 			return result, UserActionError{Result: result}
 		}
 		return Result{}, err
