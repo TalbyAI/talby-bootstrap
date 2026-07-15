@@ -2,75 +2,87 @@ package repositorystate
 
 import (
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
 
+func managedPathKey(path string) string {
+	path = filepath.Clean(filepath.FromSlash(path))
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
+}
+
 func ValidateMaterializationRecord(record MaterializationRecord) error {
-	seenArtifacts := map[string]struct{}{}
-	seenFiles := map[string]struct{}{}
-
-	for _, artifact := range record.Artifacts {
-		if err := validateSourceIdentity(artifact.Key.Source); err != nil {
-			return fmt.Errorf("managed artifact source: %w", err)
+	owners := map[ArtifactKey]struct{}{}
+	paths := map[string]struct{}{}
+	for _, a := range record.Artifacts {
+		if a.Source.Type == "" || a.Source.Locator == "" || a.ResolvedVersion == "" || a.Artifact == "" || a.ArtifactVersion == "" {
+			return fmt.Errorf("complete managed artifact fields are required")
 		}
-		if artifact.Key.ResolvedVersion == "" {
-			return fmt.Errorf("managed artifact resolved version is required")
+		k := ManagedArtifactKey(a)
+		if _, ok := owners[k]; ok {
+			return fmt.Errorf("duplicate managed artifact")
 		}
-		if artifact.Key.Artifact == "" {
-			return fmt.Errorf("managed artifact name is required")
+		owners[k] = struct{}{}
+		if len(a.Files) == 0 {
+			return fmt.Errorf("managed artifact requires files")
 		}
-		key := managedArtifactKeyString(artifact.Key)
-		if _, ok := seenArtifacts[key]; ok {
-			return fmt.Errorf("duplicate managed artifact %s", key)
-		}
-		seenArtifacts[key] = struct{}{}
-
-		for _, file := range artifact.Files {
-			if file.Path == "" {
-				return fmt.Errorf("managed file path is required")
+		for _, f := range a.Files {
+			native := filepath.FromSlash(f.Path)
+			if f.Path == "" || filepath.IsAbs(native) || filepath.ToSlash(filepath.Clean(native)) != f.Path {
+				return fmt.Errorf("managed file path must be canonical")
 			}
-			if len(file.Digest) != 64 || strings.Trim(file.Digest, "0123456789abcdef") != "" {
+			if len(f.Digest) != 64 || strings.Trim(f.Digest, "0123456789abcdef") != "" {
 				return fmt.Errorf("managed file digest must be a lowercase hex sha256")
 			}
-			if _, ok := seenFiles[file.Path]; ok {
-				return fmt.Errorf("managed file path %q has multiple owners", file.Path)
+			key := managedPathKey(f.Path)
+			if _, ok := paths[key]; ok {
+				return fmt.Errorf("managed file path has multiple owners")
 			}
-			seenFiles[file.Path] = struct{}{}
+			paths[key] = struct{}{}
 		}
 	}
-
 	return nil
 }
-
+func (record MaterializationRecord) Artifact(key ArtifactKey) (ManagedArtifactRecord, bool) {
+	for _, a := range record.Artifacts {
+		if ManagedArtifactKey(a) == key {
+			return a, true
+		}
+	}
+	return ManagedArtifactRecord{}, false
+}
 func UpsertManagedArtifact(record MaterializationRecord, next ManagedArtifactRecord) MaterializationRecord {
-	artifacts := append([]ManagedArtifactRecord(nil), record.Artifacts...)
-	key := managedArtifactKeyString(next.Key)
-	for i, artifact := range artifacts {
-		if managedArtifactKeyString(artifact.Key) == key {
-			artifacts[i] = next
-			return MaterializationRecord{Artifacts: artifacts}
+	values := make([]ManagedArtifactRecord, len(record.Artifacts))
+	copy(values, record.Artifacts)
+	for i := range values {
+		values[i].Files = append([]ManagedFileRecord(nil), values[i].Files...)
+	}
+	next.Files = append([]ManagedFileRecord(nil), next.Files...)
+	key := ManagedArtifactKey(next)
+	for i, a := range values {
+		if ManagedArtifactKey(a) == key {
+			values[i] = next
+			sortManaged(values)
+			return MaterializationRecord{Artifacts: values}
 		}
 	}
-	artifacts = append(artifacts, next)
-	slices.SortFunc(artifacts, func(a, b ManagedArtifactRecord) int {
-		return strings.Compare(managedArtifactKeyString(a.Key), managedArtifactKeyString(b.Key))
+	values = append(values, next)
+	sortManaged(values)
+	return MaterializationRecord{Artifacts: values}
+}
+func ManagedArtifactKey(record ManagedArtifactRecord) ArtifactKey {
+	return ArtifactKey{Source: record.Source, Name: record.Artifact}
+}
+func sortManaged(values []ManagedArtifactRecord) {
+	for i := range values {
+		slices.SortFunc(values[i].Files, func(a, b ManagedFileRecord) int { return strings.Compare(a.Path, b.Path) })
+	}
+	slices.SortFunc(values, func(a, b ManagedArtifactRecord) int {
+		return strings.Compare(SourceIdentityKey(a.Source)+"\x00"+a.Artifact, SourceIdentityKey(b.Source)+"\x00"+b.Artifact)
 	})
-	return MaterializationRecord{Artifacts: artifacts}
-}
-
-func RemoveManagedArtifact(record MaterializationRecord, key ManagedArtifactKey) MaterializationRecord {
-	filtered := make([]ManagedArtifactRecord, 0, len(record.Artifacts))
-	target := managedArtifactKeyString(key)
-	for _, artifact := range record.Artifacts {
-		if managedArtifactKeyString(artifact.Key) == target {
-			continue
-		}
-		filtered = append(filtered, artifact)
-	}
-	return MaterializationRecord{Artifacts: filtered}
-}
-
-func managedArtifactKeyString(key ManagedArtifactKey) string {
-	return key.Source.Type + "\x00" + key.Source.Name + "\x00" + key.ResolvedVersion + "\x00" + key.Artifact
 }

@@ -1,146 +1,250 @@
 package materialize
 
 import (
-	"bytes"
-	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-
-	"github.com/talby/talby-bootstrap/internal/repositorystate"
-	"github.com/talby/talby-bootstrap/internal/source"
+	"runtime"
+	"strings"
 )
 
-type Request struct {
-	Root     string
-	Key      repositorystate.ManagedArtifactKey
-	Record   repositorystate.MaterializationRecord
-	Artifact source.ArtifactDescriptor
+type EntryKind string
+
+const (
+	EntryAbsent  EntryKind = "absent"
+	EntryRegular EntryKind = "regular"
+	EntrySymlink EntryKind = "symlink"
+	EntryOther   EntryKind = "other"
+)
+
+type Observation struct {
+	Root         string
+	Path         string
+	AbsolutePath string
+	Kind         EntryKind
+	Mode         os.FileMode
+	Digest       string
+	rootInfo     os.FileInfo
 }
+type ChangedSincePreflightError struct{ Path string }
+type targetParentError struct{}
 
-type FileChange struct {
-	Path   string `json:"path"`
-	Action string `json:"action"`
-	Digest string `json:"digest"`
+func (err ChangedSincePreflightError) Error() string {
+	return fmt.Sprintf("target %q changed after preflight", err.Path)
 }
-
-type Result struct {
-	Changes      []FileChange
-	CreatedPaths []string
-}
-
-type OwnershipConflictError struct {
-	Path string
-}
-
-func (e OwnershipConflictError) Error() string {
-	return fmt.Sprintf("managed file %q is already owned by another artifact", e.Path)
-}
-
-type DriftError struct {
-	Path string
-}
-
-func (e DriftError) Error() string {
-	return fmt.Sprintf("managed file %q has drifted from the recorded state", e.Path)
-}
-
-func Apply(_ context.Context, req Request) (Result, error) {
-	owned := indexOwnedFiles(req.Record)
-	result := Result{}
-
-	for _, step := range req.Artifact.Steps {
-		if step.Type != "file" {
-			return Result{}, fmt.Errorf("unsupported step type %q", step.Type)
-		}
-		if owner, ok := owned[step.TargetPath]; ok && owner != req.Key {
-			return Result{}, OwnershipConflictError{Path: step.TargetPath}
-		}
-
-		sourceBytes, err := os.ReadFile(step.SourcePath)
+func (targetParentError) Error() string { return "target parent must be a real directory" }
+func Observe(root, target string) (Observation, error) {
+	if filepath.IsAbs(target) {
+		return Observation{}, fmt.Errorf("file target path must stay within operation root")
+	}
+	clean := filepath.Clean(target)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return Observation{}, fmt.Errorf("file target path must stay within operation root")
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return Observation{}, err
+	}
+	rootInfo, err := os.Stat(canonicalRoot)
+	if err != nil {
+		return Observation{}, err
+	}
+	absolute := filepath.Join(canonicalRoot, clean)
+	for dir := filepath.Dir(absolute); dir != canonicalRoot; dir = filepath.Dir(dir) {
+		info, err := os.Lstat(dir)
 		if err != nil {
-			return Result{}, err
+			if os.IsNotExist(err) {
+				continue
+			}
+			return Observation{}, err
 		}
-
-		targetPath, err := resolveTargetPath(req.Root, step.TargetPath)
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return Observation{}, targetParentError{}
+		}
+	}
+	ob := Observation{Root: canonicalRoot, Path: filepath.ToSlash(clean), AbsolutePath: absolute, Kind: EntryAbsent, rootInfo: rootInfo}
+	info, err := os.Lstat(absolute)
+	if os.IsNotExist(err) {
+		return ob, nil
+	}
+	if err != nil {
+		return Observation{}, err
+	}
+	ob.Mode = info.Mode()
+	if info.Mode()&os.ModeSymlink != 0 {
+		ob.Kind = EntrySymlink
+		return ob, nil
+	}
+	if !info.Mode().IsRegular() {
+		ob.Kind = EntryOther
+		return ob, nil
+	}
+	data, err := os.ReadFile(absolute)
+	if err != nil {
+		return Observation{}, err
+	}
+	ob.Kind = EntryRegular
+	ob.Digest = Digest(data)
+	return ob, nil
+}
+func PathKey(path string) string {
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
+}
+func SameObservation(a, b Observation) bool {
+	sameRoot := a.rootInfo == nil && b.rootInfo == nil
+	if a.rootInfo != nil && b.rootInfo != nil {
+		sameRoot = os.SameFile(a.rootInfo, b.rootInfo)
+	}
+	return sameRoot && a.Root == b.Root && a.Path == b.Path && a.AbsolutePath == b.AbsolutePath && a.Kind == b.Kind && a.Mode.Perm() == b.Mode.Perm() && a.Digest == b.Digest
+}
+func Revalidate(observed Observation) error {
+	current, err := Observe(observed.Root, observed.Path)
+	if err != nil {
+		var parent targetParentError
+		if errors.As(err, &parent) {
+			return ChangedSincePreflightError{Path: observed.Path}
+		}
+		return err
+	}
+	if !SameObservation(observed, current) {
+		return ChangedSincePreflightError{Path: observed.Path}
+	}
+	return nil
+}
+func Write(observed Observation, content []byte) error {
+	root, err := os.OpenRoot(observed.Root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return writeRooted(root, observed, content)
+}
+func writeRooted(root *os.Root, observed Observation, content []byte) error {
+	if err := revalidateRoot(root, observed); err != nil {
+		return err
+	}
+	path := filepath.FromSlash(observed.Path)
+	parent, base := filepath.Dir(path), filepath.Base(path)
+	if err := root.MkdirAll(parent, 0755); err != nil {
+		return err
+	}
+	dir, err := root.OpenRoot(parent)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	file, tmp, err := createTemp(dir, base)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Remove(tmp) }()
+	if n, err := file.Write(content); err != nil || n != len(content) {
+		_ = file.Close()
 		if err != nil {
-			return Result{}, err
+			return err
 		}
-		action := "created"
-		currentBytes, err := os.ReadFile(targetPath)
-		switch {
-		case err == nil && bytes.Equal(currentBytes, sourceBytes):
-			action = "unchanged"
-		case err == nil:
-			if priorDigest, ok := digestFor(req.Record, req.Key, step.TargetPath); ok && sha256Hex(currentBytes) != priorDigest {
-				return Result{}, DriftError{Path: step.TargetPath}
-			}
-			action = "updated"
-		case !os.IsNotExist(err):
-			return Result{}, err
-		}
-
-		if action != "unchanged" {
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-				return Result{}, err
-			}
-			if err := os.WriteFile(targetPath, sourceBytes, 0o644); err != nil {
-				return Result{}, err
-			}
-			if action == "created" {
-				result.CreatedPaths = append(result.CreatedPaths, targetPath)
-			}
-		}
-
-		result.Changes = append(result.Changes, FileChange{
-			Path:   step.TargetPath,
-			Action: action,
-			Digest: sha256Hex(sourceBytes),
-		})
+		return io.ErrShortWrite
 	}
-
-	return result, nil
-}
-
-func resolveTargetPath(root string, targetPath string) (string, error) {
-	cleanPath := filepath.Clean(targetPath)
-	if cleanPath == "." || cleanPath == ".." || filepath.IsAbs(cleanPath) {
-		return "", fmt.Errorf("file target path must stay within operation root")
+	mode := os.FileMode(0644)
+	if observed.Kind == EntryRegular {
+		mode = observed.Mode.Perm()
 	}
-	if len(cleanPath) >= 3 && cleanPath[:3] == ".."+string(filepath.Separator) {
-		return "", fmt.Errorf("file target path must stay within operation root")
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return err
 	}
-
-	return filepath.Join(root, cleanPath), nil
-}
-
-func sha256Hex(bytes []byte) string {
-	sum := sha256.Sum256(bytes)
-	return hex.EncodeToString(sum[:])
-}
-
-func indexOwnedFiles(record repositorystate.MaterializationRecord) map[string]repositorystate.ManagedArtifactKey {
-	owned := make(map[string]repositorystate.ManagedArtifactKey)
-	for _, artifact := range record.Artifacts {
-		for _, file := range artifact.Files {
-			owned[file.Path] = artifact.Key
-		}
+	if err := file.Close(); err != nil {
+		return err
 	}
-	return owned
+	if err := revalidateRoot(root, observed); err != nil {
+		return err
+	}
+	currentParent, err := root.Lstat(parent)
+	if err != nil {
+		return ChangedSincePreflightError{Path: observed.Path}
+	}
+	openedParent, err := dir.Stat(".")
+	if err != nil {
+		return err
+	}
+	if currentParent.Mode()&os.ModeSymlink != 0 || !currentParent.IsDir() || !os.SameFile(currentParent, openedParent) {
+		return ChangedSincePreflightError{Path: observed.Path}
+	}
+	return dir.Rename(tmp, base)
 }
-
-func digestFor(record repositorystate.MaterializationRecord, key repositorystate.ManagedArtifactKey, path string) (string, bool) {
-	for _, artifact := range record.Artifacts {
-		if artifact.Key != key {
+func revalidateRoot(root *os.Root, observed Observation) error {
+	current := observed
+	current.Kind, current.Mode, current.Digest = EntryAbsent, 0, ""
+	rootInfo, err := root.Stat(".")
+	if err != nil {
+		return err
+	}
+	current.rootInfo = rootInfo
+	path := filepath.FromSlash(observed.Path)
+	for parent := filepath.Dir(path); parent != "."; parent = filepath.Dir(parent) {
+		info, err := root.Lstat(parent)
+		if os.IsNotExist(err) {
 			continue
 		}
-		for _, file := range artifact.Files {
-			if file.Path == path {
-				return file.Digest, true
-			}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return ChangedSincePreflightError{Path: observed.Path}
 		}
 	}
-	return "", false
+	info, err := root.Lstat(path)
+	if os.IsNotExist(err) {
+		if SameObservation(observed, current) {
+			return nil
+		}
+		return ChangedSincePreflightError{Path: observed.Path}
+	}
+	if err != nil {
+		return err
+	}
+	current.Mode = info.Mode()
+	if info.Mode()&os.ModeSymlink != 0 {
+		current.Kind = EntrySymlink
+	} else if !info.Mode().IsRegular() {
+		current.Kind = EntryOther
+	} else {
+		data, err := root.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		current.Kind = EntryRegular
+		current.Digest = Digest(data)
+	}
+	if !SameObservation(observed, current) {
+		return ChangedSincePreflightError{Path: observed.Path}
+	}
+	return nil
 }
+func createTemp(root *os.Root, base string) (*os.File, string, error) {
+	for range 100 {
+		var random [8]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return nil, "", err
+		}
+		name := "." + base + "." + hex.EncodeToString(random[:]) + ".tmp"
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+		if err == nil {
+			return file, name, nil
+		}
+		if !os.IsExist(err) {
+			return nil, "", err
+		}
+	}
+	return nil, "", fmt.Errorf("create temporary file for %q: too many collisions", base)
+}
+func Digest(content []byte) string { sum := sha256.Sum256(content); return hex.EncodeToString(sum[:]) }

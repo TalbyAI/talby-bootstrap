@@ -2,7 +2,7 @@ schema_version: 1
 declarations:
   - source:
       type: file
-      name: local-example-source
+      locator: .tbboot-example/sources/local-example-source
     target:
       scope: artifact
       artifact: base-readme

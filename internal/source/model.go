@@ -27,9 +27,9 @@ type ArtifactDescriptor struct {
 }
 
 type MaterializationStep struct {
-	Type       string
-	TargetPath string
-	SourcePath string
+	Type        string
+	TargetPath  string
+	SourceBytes []byte
 }
 
 type Identity struct {
@@ -41,7 +41,7 @@ type Identity struct {
 type ResolvedSource struct {
 	Identity   Identity
 	Artifacts  []ArtifactDescriptor
-	SourcePath string
+	InputPaths []string
 }
 
 type Source interface {

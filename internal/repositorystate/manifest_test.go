@@ -1,117 +1,123 @@
 package repositorystate
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestManifestUpsertDeclarationInsertReplaceAndUnchanged(t *testing.T) {
-	base := Manifest{}
-
-	decl := Declaration{
-		Source: SourceIdentity{Type: "file", Name: "local-example-source"},
-		Target: DeclarationTarget{
-			Scope:    DeclarationScopeArtifact,
-			Artifact: "base-readme",
-		},
-		Input: &SourceInput{Locator: "/tmp/example", Version: "v1.2.3"},
+func TestValidateManifestRejectsDuplicateAndMixedScopes(t *testing.T) {
+	root := t.TempDir()
+	source := SourceIdentity{Type: "file", Locator: "sources/tools"}
+	err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: source, Target: DeclarationTarget{Scope: DeclarationScopeSource}}, {Source: source, Target: DeclarationTarget{Scope: DeclarationScopeArtifact, Artifact: "lint"}}}})
+	if err == nil || !strings.Contains(err.Error(), "mixes source and artifact scopes") {
+		t.Fatalf("ValidateManifest() error = %v, want mixed-scope error", err)
 	}
-
-	inserted, change := base.UpsertDeclaration(decl)
-	if change != ChangeKindInserted {
-		t.Fatalf("change = %q, want %q", change, ChangeKindInserted)
+}
+func TestNormalizeSourceIdentityStoresRootRelativeAndExternalAbsoluteLocators(t *testing.T) {
+	root := t.TempDir()
+	in, err := NormalizeSourceIdentity(root, SourceIdentity{Type: "file", Locator: "x"})
+	if err != nil || in.Locator != "x" {
+		t.Fatalf("in root = %#v, %v", in, err)
 	}
-
-	replaced, change := inserted.UpsertDeclaration(Declaration{
-		Source: decl.Source,
-		Target: decl.Target,
-		Input:  &SourceInput{Locator: "/tmp/other"},
-	})
-	if change != ChangeKindReplaced {
-		t.Fatalf("change = %q, want %q", change, ChangeKindReplaced)
+	out, err := NormalizeSourceIdentity(root, SourceIdentity{Type: "file", Locator: "/tmp/outside"})
+	if err != nil || out.Locator != "/tmp/outside" {
+		t.Fatalf("external = %#v, %v", out, err)
 	}
-
-	unchanged, change := replaced.UpsertDeclaration(Declaration{
-		Source: decl.Source,
-		Target: decl.Target,
-		Input:  &SourceInput{Locator: "/tmp/other"},
-	})
-	if change != ChangeKindUnchanged {
-		t.Fatalf("change = %q, want %q", change, ChangeKindUnchanged)
+}
+func TestNormalizeSourceIdentityCanonicalizesSymlinkContainment(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(root, "linked")); err != nil {
+		t.Skipf("create symlink: %v", err)
 	}
-	if len(unchanged.Declarations) != 1 {
-		t.Fatalf("len(Declarations) = %d, want 1", len(unchanged.Declarations))
+	got, err := NormalizeSourceIdentity(root, SourceIdentity{Type: "file", Locator: "linked"})
+	if err != nil || got.Locator != filepath.ToSlash(external) {
+		t.Fatalf("NormalizeSourceIdentity() = %#v, %v, want external canonical locator", got, err)
+	}
+}
+func TestValidateManifestRejectsMismatchedPreservedLocator(t *testing.T) {
+	root := t.TempDir()
+	err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: SourceIdentity{Type: "file", Locator: "x"}, Target: DeclarationTarget{Scope: DeclarationScopeSource}, Input: &SourceInput{Locator: "y"}}}})
+	if err == nil {
+		t.Fatal("expected mismatch")
 	}
 }
 
-func TestValidateManifestRejectsInvalidTargetsAndDuplicates(t *testing.T) {
-	err := ValidateManifest(Manifest{
-		Declarations: []Declaration{
-			{
-				Source: SourceIdentity{Type: "file", Name: "local-example-source"},
-				Target: DeclarationTarget{Scope: DeclarationScopeArtifact},
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("ValidateManifest() error = nil, want missing artifact name error")
+func TestNormalizeSourceIdentityRejectsIncompleteAndUnsupportedSources(t *testing.T) {
+	root := t.TempDir()
+	if _, err := NormalizeSourceIdentity(root, SourceIdentity{}); err == nil {
+		t.Fatal("expected incomplete source rejection")
 	}
+	if _, err := NormalizeSourceIdentity(root, SourceIdentity{Type: "git", Locator: "x"}); err == nil {
+		t.Fatal("expected unsupported source rejection")
+	}
+	if _, err := NormalizeSourceIdentity(filepath.Join(root, "missing"), SourceIdentity{Type: SourceTypeFile, Locator: "x"}); err == nil {
+		t.Fatal("expected missing root rejection")
+	}
+}
 
-	err = ValidateManifest(Manifest{
-		Declarations: []Declaration{
-			{
-				Source: SourceIdentity{Name: "local-example-source"},
-				Target: DeclarationTarget{Scope: DeclarationScopeArtifact, Artifact: "base-readme"},
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("ValidateManifest() error = nil, want missing source type error")
+func TestAcquisitionLocatorRequiresNormalizedSource(t *testing.T) {
+	root := t.TempDir()
+	if _, err := AcquisitionLocator(root, SourceIdentity{Type: "git", Locator: "source"}); err == nil {
+		t.Fatal("expected unsupported source rejection")
 	}
+	if _, err := AcquisitionLocator(root, SourceIdentity{Type: SourceTypeFile, Locator: "./source"}); err == nil {
+		t.Fatal("expected unnormalized locator rejection")
+	}
+	got, err := AcquisitionLocator(root, SourceIdentity{Type: SourceTypeFile, Locator: "source"})
+	if err != nil || got != filepath.Join(root, "source") {
+		t.Fatalf("AcquisitionLocator() = %q, %v", got, err)
+	}
+}
 
-	err = ValidateManifest(Manifest{
-		Declarations: []Declaration{
-			{
-				Source: SourceIdentity{Type: "http", Name: "remote-example-source"},
-				Target: DeclarationTarget{Scope: DeclarationScopeArtifact, Artifact: "base-readme"},
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("ValidateManifest() error = nil, want unsupported source type error")
+func TestManifestAddDeclarationKindsAndConflicts(t *testing.T) {
+	root := t.TempDir()
+	declaration := Declaration{Source: SourceIdentity{Type: SourceTypeFile, Locator: "source"}, Target: DeclarationTarget{Scope: DeclarationScopeArtifact, Artifact: "a"}}
+	manifest, kind, err := (Manifest{}).AddDeclaration(root, declaration)
+	if err != nil || kind != ChangeKindInserted || len(manifest.Declarations) != 1 {
+		t.Fatalf("insert = %#v, %q, %v", manifest, kind, err)
 	}
+	_, kind, err = manifest.AddDeclaration(root, declaration)
+	if err != nil || kind != ChangeKindUnchanged {
+		t.Fatalf("same kind = %q, error = %v", kind, err)
+	}
+	declaration.Input = &SourceInput{Locator: "source"}
+	if _, _, err := manifest.AddDeclaration(root, declaration); err == nil {
+		t.Fatal("expected conflicting declaration")
+	}
+	if _, _, err := manifest.AddDeclaration(root, Declaration{Source: SourceIdentity{Type: "git", Locator: "source"}}); err == nil {
+		t.Fatal("expected invalid source")
+	}
+	if _, _, err := manifest.AddDeclaration(root, Declaration{Source: SourceIdentity{Type: SourceTypeFile, Locator: "source"}}); err == nil {
+		t.Fatal("expected invalid target")
+	}
+}
 
-	err = ValidateManifest(Manifest{
-		Declarations: []Declaration{
-			{
-				Source: SourceIdentity{Type: "file", Name: "local-example-source"},
-				Target: DeclarationTarget{Scope: DeclarationScopeSource, Artifact: "base-readme"},
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("ValidateManifest() error = nil, want source-scoped artifact error")
+func TestValidateManifestTargetsTrustAndDuplicates(t *testing.T) {
+	root := t.TempDir()
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+	if err := ValidateManifest(root, Manifest{TrustPolicy: TrustPolicy{ApprovedSources: []SourceIdentity{{Type: "git", Locator: "source"}}}}); err == nil {
+		t.Fatal("expected invalid approved source")
 	}
-
-	err = ValidateManifest(Manifest{
-		Declarations: []Declaration{
-			{
-				Source: SourceIdentity{Type: "file", Name: "local-example-source"},
-				Target: DeclarationTarget{Scope: DeclarationScopeSource},
-			},
-			{
-				Source: SourceIdentity{Type: "file", Name: "local-example-source"},
-				Target: DeclarationTarget{Scope: DeclarationScopeSource},
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("ValidateManifest() error = nil, want duplicate source-scope declaration error")
+	if err := ValidateManifest(root, Manifest{TrustPolicy: TrustPolicy{ApprovedSources: []SourceIdentity{{Type: SourceTypeFile, Locator: "./source"}}}}); err == nil {
+		t.Fatal("expected unnormalized approved source")
 	}
-	if strings.Contains(err.Error(), "\x00") {
-		t.Fatalf("ValidateManifest() error = %q, want readable duplicate error", err)
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: SourceIdentity{Type: "git", Locator: "source"}}}}); err == nil {
+		t.Fatal("expected invalid declaration source")
 	}
-	if !strings.Contains(err.Error(), "source file/local-example-source target source/") {
-		t.Fatalf("ValidateManifest() error = %q, want source and target identity", err)
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: source}}}); err == nil {
+		t.Fatal("expected missing scope")
+	}
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: source, Target: DeclarationTarget{Scope: DeclarationScopeArtifact}}}}); err == nil {
+		t.Fatal("expected missing artifact")
+	}
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: source, Target: DeclarationTarget{Scope: DeclarationScopeSource, Artifact: "a"}}}}); err == nil {
+		t.Fatal("expected source artifact rejection")
+	}
+	declaration := Declaration{Source: source, Target: DeclarationTarget{Scope: DeclarationScopeSource}}
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{declaration, declaration}}); err == nil {
+		t.Fatal("expected duplicate declaration")
 	}
 }

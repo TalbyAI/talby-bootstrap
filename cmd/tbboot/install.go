@@ -17,24 +17,6 @@ import (
 	sourcefile "github.com/talby/talby-bootstrap/internal/source/file"
 )
 
-type sourceIdentityJSON struct {
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-type artifactDescriptorJSON struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Path    string `json:"path"`
-}
-
-type fileChangeJSON struct {
-	Path   string `json:"path"`
-	Action string `json:"action"`
-	Digest string `json:"digest"`
-}
-
 func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra.Command {
 	var artifact string
 	var declareOnly bool
@@ -64,21 +46,9 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 					return err
 				}
 				if opts.output == outputJSON {
-					envelope := app.Success("sync succeeded")
-					envelope.Details = map[string]any{
-						"source":   mapSourceIdentity(result.Source),
-						"artifact": mapArtifactDescriptor(result.Artifact),
-						"change":   result.Change,
-						"files":    mapFileChanges(result.Files),
-					}
-					return json.NewEncoder(stdout).Encode(envelope)
+					return json.NewEncoder(stdout).Encode(resultEnvelope("sync succeeded", result))
 				}
-				if result.Change == installsvc.ChangeNoOp {
-					_, err = fmt.Fprintln(stdout, "sync: no changes")
-					return err
-				}
-				_, err = fmt.Fprintf(stdout, "synced artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
-				return err
+				return writeResult(stdout, result)
 			}
 
 			ref, err := parseSourceRef(args[0])
@@ -104,29 +74,9 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 				if declareOnly {
 					message = "declare-only succeeded"
 				}
-				envelope := app.Success(message)
-				envelope.Details = map[string]any{
-					"source":   mapSourceIdentity(result.Source),
-					"artifact": mapArtifactDescriptor(result.Artifact),
-				}
-				envelope.Details["change"] = result.Change
-				if !declareOnly {
-					envelope.Details["files"] = mapFileChanges(result.Files)
-				}
-				return json.NewEncoder(stdout).Encode(envelope)
+				return json.NewEncoder(stdout).Encode(resultEnvelope(message, result))
 			}
-
-			if declareOnly {
-				if result.Change == installsvc.ChangeNoOp {
-					_, err = fmt.Fprintf(stdout, "artifact %s from %s is already declared\n", result.Artifact.Name, result.Source.Name)
-					return err
-				}
-				_, err = fmt.Fprintf(stdout, "declared artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
-				return err
-			}
-
-			_, err = fmt.Fprintf(stdout, "installed artifact %s from %s\n", result.Artifact.Name, result.Source.Name)
-			return err
+			return writeResult(stdout, result)
 		},
 	}
 
@@ -135,32 +85,48 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 	return cmd
 }
 
-func mapSourceIdentity(identity source.Identity) sourceIdentityJSON {
-	return sourceIdentityJSON{
-		Type:    identity.Type,
-		Name:    identity.Name,
-		Version: identity.Version,
+func resultEnvelope(message string, result installsvc.Result) app.Result {
+	details := map[string]any{
+		"operation":      result.Operation,
+		"outcome":        result.Outcome,
+		"artifact_count": result.ArtifactCount,
 	}
+	if len(result.Changes) != 0 {
+		details["changes"] = result.Changes
+	}
+	if len(result.Conflicts) != 0 {
+		details["conflicts"] = result.Conflicts
+	}
+	return app.Result{Code: app.ExitSuccess, Message: message, Details: details}
 }
 
-func mapArtifactDescriptor(artifact source.ArtifactDescriptor) artifactDescriptorJSON {
-	return artifactDescriptorJSON{
-		Name:    artifact.Name,
-		Version: artifact.Version,
-		Path:    artifact.Path,
+func writeResult(stdout io.Writer, result installsvc.Result) error {
+	if result.Outcome == installsvc.OutcomeNoOp {
+		_, err := fmt.Fprintf(stdout, "%s: no changes (%d artifacts)\n", result.Operation, result.ArtifactCount)
+		return err
 	}
-}
-
-func mapFileChanges(changes []installsvc.FileChange) []fileChangeJSON {
-	mapped := make([]fileChangeJSON, 0, len(changes))
-	for _, change := range changes {
-		mapped = append(mapped, fileChangeJSON{
-			Path:   change.Path,
-			Action: change.Action,
-			Digest: change.Digest,
-		})
+	if _, err := fmt.Fprintf(stdout, "%s: applied %d changes (%d artifacts)\n", result.Operation, len(result.Changes), result.ArtifactCount); err != nil {
+		return err
 	}
-	return mapped
+	for _, change := range result.Changes {
+		fields := []string{string(change.Kind), change.Source.Type + ":" + change.Source.Locator}
+		if change.SourceVersion != "" {
+			fields = append(fields, "source_version="+change.SourceVersion)
+		}
+		if change.Artifact != "" {
+			fields = append(fields, change.Artifact)
+		}
+		if change.Path != "" {
+			fields = append(fields, change.Path)
+		}
+		if change.OwnershipKind != "" {
+			fields = append(fields, "ownership_kind="+string(change.OwnershipKind))
+		}
+		if _, err := fmt.Fprintln(stdout, strings.Join(fields, " ")); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func parseSourceRef(raw string) (source.Ref, error) {

@@ -4,22 +4,16 @@ type Manifest struct {
 	TrustPolicy  TrustPolicy
 	Declarations []Declaration
 }
-
-type TrustPolicy struct {
-	ApprovedSources []SourceIdentity
-}
-
+type TrustPolicy struct{ ApprovedSources []SourceIdentity }
 type Declaration struct {
 	Source SourceIdentity
 	Target DeclarationTarget
 	Input  *SourceInput
 }
-
 type DeclarationTarget struct {
 	Scope    DeclarationScope
 	Artifact string
 }
-
 type DeclarationScope string
 
 const (
@@ -28,55 +22,43 @@ const (
 )
 
 type SourceIdentity struct {
-	Type string
-	Name string
+	Type    string `yaml:"type" json:"type"`
+	Locator string `yaml:"locator" json:"locator"`
 }
 
-const (
-	SourceTypeFile = "file"
-	SourceTypeGit  = "git"
-)
+const SourceTypeFile = "file"
 
-type SourceInput struct {
-	Locator string
-	Version string
+type SourceInput struct{ Locator string }
+type ArtifactKey struct {
+	Source SourceIdentity
+	Name   string
 }
-
-type Lockfile struct {
-	Resolutions []Resolution
-}
-
-type MaterializationRecord struct {
-	Artifacts []ManagedArtifactRecord
-}
-
-type ManagedArtifactRecord struct {
-	Key   ManagedArtifactKey
-	Files []ManagedFileRecord
-}
-
-type ManagedArtifactKey struct {
+type SnapshotKey struct {
 	Source          SourceIdentity
 	ResolvedVersion string
-	Artifact        string
 }
-
-type ManagedFileRecord struct {
-	Path   string
-	Digest string
-}
-
+type Lockfile struct{ Resolutions []Resolution }
 type Resolution struct {
 	Source          SourceIdentity
 	ResolvedVersion string
-	Artifact        ArtifactResolution
+	Artifacts       []ArtifactResolution
 }
-
 type ArtifactResolution struct {
 	Name    string
 	Version string
 }
-
+type MaterializationRecord struct{ Artifacts []ManagedArtifactRecord }
+type ManagedArtifactRecord struct {
+	Source          SourceIdentity
+	ResolvedVersion string
+	Artifact        string
+	ArtifactVersion string
+	Files           []ManagedFileRecord
+}
+type ManagedFileRecord struct {
+	Path   string
+	Digest string
+}
 type ChangeKind string
 
 const (
@@ -112,7 +94,4 @@ func (e StateFileError) Error() string {
 	}
 	return string(e.File) + " " + string(e.Kind) + ": " + e.Err.Error()
 }
-
-func (e StateFileError) Unwrap() error {
-	return e.Err
-}
+func (e StateFileError) Unwrap() error { return e.Err }

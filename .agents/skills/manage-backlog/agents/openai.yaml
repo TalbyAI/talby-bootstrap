@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage backlog"
+  short_description: "Add, prioritize, and retire backlog ideas"
+  default_prompt: "Use $manage-backlog to add this idea to the repository backlog."

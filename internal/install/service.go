@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-
-	"github.com/talby/talby-bootstrap/internal/materialize"
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
 	"github.com/talby/talby-bootstrap/internal/source"
+	"path/filepath"
+	"slices"
+	"strings"
 )
 
 type Request struct {
@@ -19,65 +17,80 @@ type Request struct {
 	Artifact    string
 	DeclareOnly bool
 }
+type SyncRequest struct{ Root string }
+type Outcome string
 
-type SyncRequest struct {
-	Root string
-}
+const (
+	OutcomeNoOp     Outcome = "no_op"
+	OutcomeApplied  Outcome = "applied"
+	OutcomeConflict Outcome = "conflict"
+)
 
 type ChangeKind string
 
 const (
-	ChangeDeclared  ChangeKind = "declared"
-	ChangeInstalled ChangeKind = "installed"
-	ChangeNoOp      ChangeKind = "noop"
+	ChangeDeclarationAdded ChangeKind = "declaration_added"
+	ChangeFileCreated      ChangeKind = "file_created"
+	ChangeFileUpdated      ChangeKind = "file_updated"
+	ChangeOwnershipAdopted ChangeKind = "ownership_adopted"
+	ChangeResolutionLocked ChangeKind = "resolution_locked"
+	ChangeLockPruned       ChangeKind = "lock_pruned"
 )
 
+type OwnershipKind string
+
+const OwnershipWholeFile OwnershipKind = "whole_file"
+
+type Change struct {
+	Kind          ChangeKind                     `json:"kind"`
+	Source        repositorystate.SourceIdentity `json:"source"`
+	SourceVersion string                         `json:"source_version,omitempty"`
+	Artifact      string                         `json:"artifact,omitempty"`
+	Path          string                         `json:"path,omitempty"`
+	OwnershipKind OwnershipKind                  `json:"ownership_kind,omitempty"`
+}
+type ConflictKind string
+
+const (
+	ConflictIntent          ConflictKind = "intent"
+	ConflictOwnership       ConflictKind = "ownership"
+	ConflictDrift           ConflictKind = "drift"
+	ConflictRemovalRequired ConflictKind = "removal_required"
+)
+
+type Conflict struct {
+	Kind     ConflictKind                   `json:"kind"`
+	Source   repositorystate.SourceIdentity `json:"source"`
+	Artifact string                         `json:"artifact,omitempty"`
+	Paths    []string                       `json:"paths,omitempty"`
+}
 type Result struct {
-	Source   source.Identity
-	Artifact source.ArtifactDescriptor
-	Change   ChangeKind
-	Files    []materialize.FileChange
+	Operation     string     `json:"operation"`
+	Outcome       Outcome    `json:"outcome"`
+	ArtifactCount int        `json:"artifact_count"`
+	Changes       []Change   `json:"changes,omitempty"`
+	Conflicts     []Conflict `json:"conflicts,omitempty"`
 }
+type UserActionError struct{ Result Result }
 
-type FileChange = materialize.FileChange
-
-type ConflictError struct {
-	SourceName string
-	Artifact   string
-}
-
-func (e ConflictError) Error() string {
-	return fmt.Sprintf(
-		`artifact %q from source %q is already declared with different input; use upgrade`,
-		e.Artifact,
-		e.SourceName,
-	)
+func (e UserActionError) Error() string {
+	return fmt.Sprintf("operation has %d conflict(s)", len(e.Result.Conflicts))
 }
 
 type TrustPolicyError struct {
-	SourceType    string
-	Locator       string
-	OperationRoot string
+	Denied []repositorystate.SourceIdentity
 }
 
 func (e TrustPolicyError) Error() string {
-	return fmt.Sprintf(
-		`source %q is outside the operation root %q and is not allowed by default`,
-		e.Locator,
-		e.OperationRoot,
-	)
-}
-
-type ManagedArtifactRemovalError struct {
-	Artifact repositorystate.ManagedArtifactKey
-}
-
-func (e ManagedArtifactRemovalError) Error() string {
-	return fmt.Sprintf(
-		`sync would remove managed artifact %q from source %q; removal requires user action`,
-		e.Artifact.Artifact,
-		e.Artifact.Source.Name,
-	)
+	values := append([]repositorystate.SourceIdentity(nil), e.Denied...)
+	slices.SortFunc(values, func(a, b repositorystate.SourceIdentity) int {
+		return strings.Compare(repositorystate.SourceIdentityKey(a), repositorystate.SourceIdentityKey(b))
+	})
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = v.Type + ":" + v.Locator
+	}
+	return "unapproved sources: " + strings.Join(parts, ", ")
 }
 
 type Service struct {
@@ -86,372 +99,172 @@ type Service struct {
 }
 
 func NewService(registry source.Registry, store repositorystate.Store) Service {
-	return Service{
-		registry: registry,
-		store:    store,
-	}
+	return Service{registry: registry, store: store}
 }
-
-func (s Service) Install(ctx context.Context, req Request) (Result, error) {
-	if req.Source.Type == "" {
+func (service Service) Install(ctx context.Context, request Request) (Result, error) {
+	if request.Root == "" {
+		return Result{}, fmt.Errorf("repository root is required")
+	}
+	if request.Source.Type == "" {
 		return Result{}, fmt.Errorf("source type is required")
 	}
-	if req.Source.Locator == "" {
+	if request.Source.Locator == "" {
 		return Result{}, fmt.Errorf("source locator is required")
 	}
-	if req.DeclareOnly && req.Root == "" {
-		return Result{}, fmt.Errorf("repository root is required for declare-only install")
+	if request.Source.Version != "" {
+		return Result{}, fmt.Errorf("requested source versions are not supported")
 	}
-	if err := enforceDirectSourceTrust(req.Root, req.Source); err != nil {
-		return Result{}, err
-	}
-
-	sourceImpl, err := s.registry.Lookup(req.Source.Type)
+	identity, err := repositorystate.NormalizeSourceIdentity(request.Root, repositorystate.SourceIdentity{Type: request.Source.Type, Locator: request.Source.Locator})
 	if err != nil {
 		return Result{}, err
 	}
-
-	resolved, err := sourceImpl.Resolve(ctx, source.ResolveRequest{Ref: req.Source})
+	manifest, err := service.loadManifestOrEmpty(ctx, request.Root)
 	if err != nil {
 		return Result{}, err
 	}
-
-	artifact, err := selectArtifact(resolved.Artifacts, req.Artifact)
+	declaration := declarationFor(request, identity)
+	next, kind, err := manifest.AddDeclaration(request.Root, declaration)
+	if err != nil {
+		result := resultForConflicts("install", 0, []Conflict{{Kind: ConflictIntent, Source: identity, Artifact: request.Artifact}})
+		return result, UserActionError{Result: result}
+	}
+	if request.DeclareOnly && kind == repositorystate.ChangeKindUnchanged {
+		return Result{Operation: "install", Outcome: OutcomeNoOp}, nil
+	}
+	if !approved(manifest.TrustPolicy, identity) && outsideRoot(identity) {
+		return Result{}, TrustPolicyError{Denied: []repositorystate.SourceIdentity{identity}}
+	}
+	acquire, err := repositorystate.AcquisitionLocator(request.Root, identity)
 	if err != nil {
 		return Result{}, err
 	}
-
-	result := Result{
-		Source:   resolved.Identity,
-		Artifact: artifact,
-	}
-	if req.Root == "" {
-		return result, nil
-	}
-
-	manifest, err := s.loadManifestOrEmpty(ctx, req.Root)
+	impl, err := service.registry.Lookup(identity.Type)
 	if err != nil {
 		return Result{}, err
 	}
-
-	decl := ManifestDeclaration(req, result)
-	next, change := manifest.UpsertDeclaration(decl)
-	switch change {
-	case repositorystate.ChangeKindInserted:
-	case repositorystate.ChangeKindUnchanged:
-	default:
-		return Result{}, ConflictError{
-			SourceName: decl.Source.Name,
-			Artifact:   decl.Target.Artifact,
+	resolved, err := impl.Resolve(ctx, source.ResolveRequest{Ref: source.Ref{Type: identity.Type, Locator: acquire}})
+	if err != nil {
+		return Result{}, err
+	}
+	selected, err := selectedArtifacts(resolved, declaration.Target)
+	if err != nil {
+		return Result{}, err
+	}
+	if request.DeclareOnly {
+		if err := service.store.WriteManifest(ctx, request.Root, next); err != nil {
+			return Result{}, err
+		}
+		return Result{Operation: "install", Outcome: OutcomeApplied, ArtifactCount: len(selected), Changes: []Change{{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact}}}, nil
+	}
+	lock, err := service.loadLockfileOrEmpty(ctx, request.Root)
+	if err != nil {
+		return Result{}, err
+	}
+	record, err := service.loadMaterializationRecordOrEmpty(ctx, request.Root)
+	if err != nil {
+		return Result{}, err
+	}
+	var locked *repositorystate.Resolution
+	if declaration.Target.Scope == repositorystate.DeclarationScopeArtifact {
+		if resolution, _, ok := lock.Artifact(repositorystate.ArtifactKey{Source: identity, Name: request.Artifact}); ok {
+			locked = &resolution
+		}
+	} else {
+		for _, resolution := range lock.Resolutions {
+			if resolution.Source == identity {
+				if locked != nil {
+					return Result{}, fmt.Errorf("multiple locked snapshots for source")
+				}
+				copy := resolution
+				locked = &copy
+			}
 		}
 	}
-	if change == repositorystate.ChangeKindInserted {
-		if err := s.store.WriteManifest(ctx, req.Root, next); err != nil {
+	if locked != nil {
+		selected, err = verifyLocked(declaration, *locked, resolved)
+		if err != nil {
 			return Result{}, err
 		}
 	}
-	if req.DeclareOnly {
-		if change == repositorystate.ChangeKindUnchanged {
-			result.Change = ChangeNoOp
-		} else {
-			result.Change = ChangeDeclared
+	desired := make([]desiredArtifact, 0, len(selected))
+	for _, artifact := range selected {
+		desired = append(desired, desiredArtifact{Key: repositorystate.ArtifactKey{Source: identity, Name: artifact.Name}, Resolution: repositorystate.ArtifactResolution{Name: artifact.Name, Version: artifact.Version}, ResolvedVersion: resolved.Identity.Version, Descriptor: artifact, InputPaths: resolved.InputPaths})
+	}
+	prepared := preparedOperation{Desired: desired, Lockfile: lock, Record: record}
+	if locked == nil {
+		resolution := resolutionFor(identity, resolved, selected)
+		var change repositorystate.ChangeKind
+		prepared.Lockfile, change, err = lock.UpsertResolution(resolution)
+		if err != nil {
+			return Result{}, err
 		}
-		return result, nil
-	}
-
-	record, err := s.loadMaterializationRecordOrEmpty(ctx, req.Root)
-	if err != nil {
-		return Result{}, err
-	}
-	matResult, err := materialize.Apply(ctx, materialize.Request{
-		Root:     req.Root,
-		Key:      ManagedArtifactKeyFor(result),
-		Record:   record,
-		Artifact: result.Artifact,
-	})
-	if err != nil {
-		return Result{}, err
-	}
-
-	nextRecord := repositorystate.UpsertManagedArtifact(record, ManagedArtifactRecordFor(result, matResult))
-	if err := s.store.WriteMaterializationRecord(ctx, req.Root, nextRecord); err != nil {
-		rollbackCreatedFiles(matResult.CreatedPaths)
-		return Result{}, err
-	}
-
-	lockfile, err := s.loadLockfileOrEmpty(ctx, req.Root)
-	if err != nil {
-		rollbackCreatedFiles(matResult.CreatedPaths)
-		return Result{}, err
-	}
-
-	nextLockfile, _ := lockfile.UpsertResolution(LockfileResolution(result))
-	if err := s.store.WriteLockfile(ctx, req.Root, nextLockfile); err != nil {
-		rollbackCreatedFiles(matResult.CreatedPaths)
-		return Result{}, err
-	}
-
-	result.Files = append(result.Files, matResult.Changes...)
-	if allFileChangesUnchanged(matResult.Changes) {
-		result.Change = ChangeNoOp
-	} else {
-		result.Change = ChangeInstalled
-	}
-	return result, nil
-}
-
-func (s Service) Sync(ctx context.Context, req SyncRequest) (Result, error) {
-	if req.Root == "" {
-		return Result{}, fmt.Errorf("repository root is required for sync")
-	}
-
-	manifest, err := s.store.LoadManifest(ctx, req.Root)
-	if err != nil {
-		return Result{}, err
-	}
-	if len(manifest.Declarations) != 1 {
-		return Result{}, fmt.Errorf("sync requires exactly one declaration")
-	}
-	decl := manifest.Declarations[0]
-	if decl.Input == nil || decl.Input.Locator == "" {
-		return Result{}, fmt.Errorf("sync requires a persisted source locator")
-	}
-
-	lockfile, err := s.store.LoadLockfile(ctx, req.Root)
-	if err != nil {
-		return Result{}, err
-	}
-	resolution, err := findResolution(lockfile, decl.Source, decl.Target.Artifact)
-	if err != nil {
-		return Result{}, err
-	}
-
-	record, err := s.loadMaterializationRecordForSync(ctx, req.Root)
-	if err != nil {
-		return Result{}, err
-	}
-
-	ref := source.Ref{
-		Type:    decl.Source.Type,
-		Locator: decl.Input.Locator,
-		Version: resolution.ResolvedVersion,
-	}
-	if err := enforcePersistedTrust(req.Root, manifest.TrustPolicy, ref, decl.Source); err != nil {
-		return Result{}, err
-	}
-
-	sourceImpl, err := s.registry.Lookup(ref.Type)
-	if err != nil {
-		return Result{}, err
-	}
-	resolved, err := sourceImpl.Resolve(ctx, source.ResolveRequest{Ref: ref})
-	if err != nil {
-		return Result{}, err
-	}
-	if resolved.Identity.Version != resolution.ResolvedVersion {
-		return Result{}, fmt.Errorf(
-			"locked source version %q no longer matches current source snapshot %q",
-			resolution.ResolvedVersion,
-			resolved.Identity.Version,
-		)
-	}
-	artifact, err := selectArtifact(resolved.Artifacts, decl.Target.Artifact)
-	if err != nil {
-		return Result{}, err
-	}
-
-	result := Result{
-		Source:   resolved.Identity,
-		Artifact: artifact,
-	}
-	if err := ensureNoManagedArtifactRemoval(record, ManagedArtifactKeyFor(result)); err != nil {
-		return Result{}, err
-	}
-	matResult, err := materialize.Apply(ctx, materialize.Request{
-		Root:     req.Root,
-		Key:      ManagedArtifactKeyFor(result),
-		Record:   record,
-		Artifact: artifact,
-	})
-	if err != nil {
-		return Result{}, err
-	}
-
-	nextRecord := repositorystate.UpsertManagedArtifact(record, ManagedArtifactRecordFor(result, matResult))
-	if err := s.store.WriteMaterializationRecord(ctx, req.Root, nextRecord); err != nil {
-		rollbackCreatedFiles(matResult.CreatedPaths)
-		return Result{}, err
-	}
-	result.Files = append(result.Files, matResult.Changes...)
-	if allFileChangesUnchanged(matResult.Changes) {
-		result.Change = ChangeNoOp
-	} else {
-		result.Change = ChangeInstalled
-	}
-	return result, nil
-}
-
-func enforcePersistedTrust(root string, policy repositorystate.TrustPolicy, ref source.Ref, identity repositorystate.SourceIdentity) error {
-	if isApprovedSource(policy, identity) {
-		return nil
-	}
-
-	return enforceDirectSourceTrust(root, ref)
-}
-
-func enforceDirectSourceTrust(root string, ref source.Ref) error {
-	if ref.Type != repositorystate.SourceTypeFile || root == "" {
-		return nil
-	}
-
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return err
-	}
-	absLocator, err := filepath.Abs(ref.Locator)
-	if err != nil {
-		return err
-	}
-	rel, err := filepath.Rel(absRoot, absLocator)
-	if err != nil {
-		return err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return TrustPolicyError{
-			SourceType:    ref.Type,
-			Locator:       absLocator,
-			OperationRoot: absRoot,
+		if change != repositorystate.ChangeKindUnchanged {
+			prepared.Changes = append(prepared.Changes, Change{Kind: ChangeResolutionLocked, Source: identity, SourceVersion: resolved.Identity.Version, Artifact: request.Artifact})
 		}
 	}
-
-	return nil
-}
-
-func (s Service) loadManifestOrEmpty(ctx context.Context, root string) (repositorystate.Manifest, error) {
-	manifest, err := s.store.LoadManifest(ctx, root)
-	if err == nil {
-		return manifest, nil
+	if kind == repositorystate.ChangeKindInserted {
+		prepared.Changes = append(prepared.Changes, Change{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact})
 	}
-
-	var stateErr repositorystate.StateFileError
-	if errors.As(err, &stateErr) &&
-		stateErr.File == repositorystate.StateFileManifest &&
-		stateErr.Kind == repositorystate.StateFileErrorNotFound {
+	prepared.Files, prepared.Conflicts, err = preflightFiles(request.Root, desired, record)
+	if err != nil {
+		return Result{}, err
+	}
+	if len(prepared.Conflicts) > 0 {
+		result := resultForConflicts("install", len(desired), prepared.Conflicts)
+		return result, UserActionError{Result: result}
+	}
+	return service.persistPrepared(ctx, request.Root, "install", prepared, &next)
+}
+func selectedArtifacts(resolved source.ResolvedSource, target repositorystate.DeclarationTarget) ([]source.ArtifactDescriptor, error) {
+	if target.Scope == repositorystate.DeclarationScopeSource {
+		if len(resolved.Artifacts) == 0 {
+			return nil, fmt.Errorf("source must contain at least one artifact")
+		}
+		return append([]source.ArtifactDescriptor(nil), resolved.Artifacts...), nil
+	}
+	for _, a := range resolved.Artifacts {
+		if a.Name == target.Artifact {
+			return []source.ArtifactDescriptor{a}, nil
+		}
+	}
+	return nil, fmt.Errorf("artifact %q was not found", target.Artifact)
+}
+func (service Service) loadManifestOrEmpty(ctx context.Context, root string) (repositorystate.Manifest, error) {
+	m, err := service.store.LoadManifest(ctx, root)
+	if stateNotFound(err, repositorystate.StateFileManifest) {
 		return repositorystate.Manifest{}, nil
 	}
-
-	return repositorystate.Manifest{}, err
+	return m, err
 }
-
-func (s Service) loadLockfileOrEmpty(ctx context.Context, root string) (repositorystate.Lockfile, error) {
-	lockfile, err := s.store.LoadLockfile(ctx, root)
-	if err == nil {
-		return lockfile, nil
-	}
-
-	var stateErr repositorystate.StateFileError
-	if errors.As(err, &stateErr) &&
-		stateErr.File == repositorystate.StateFileLockfile &&
-		stateErr.Kind == repositorystate.StateFileErrorNotFound {
+func (service Service) loadLockfileOrEmpty(ctx context.Context, root string) (repositorystate.Lockfile, error) {
+	v, err := service.store.LoadLockfile(ctx, root)
+	if stateNotFound(err, repositorystate.StateFileLockfile) {
 		return repositorystate.Lockfile{}, nil
 	}
-
-	return repositorystate.Lockfile{}, err
+	return v, err
 }
-
-func (s Service) loadMaterializationRecordOrEmpty(ctx context.Context, root string) (repositorystate.MaterializationRecord, error) {
-	record, err := s.store.LoadMaterializationRecord(ctx, root)
-	if err == nil {
-		return record, nil
-	}
-
-	var stateErr repositorystate.StateFileError
-	if errors.As(err, &stateErr) &&
-		stateErr.File == repositorystate.StateFileMaterializationRecord &&
-		stateErr.Kind == repositorystate.StateFileErrorNotFound {
+func (service Service) loadMaterializationRecordOrEmpty(ctx context.Context, root string) (repositorystate.MaterializationRecord, error) {
+	v, err := service.store.LoadMaterializationRecord(ctx, root)
+	if stateNotFound(err, repositorystate.StateFileMaterializationRecord) {
 		return repositorystate.MaterializationRecord{}, nil
 	}
-
-	return repositorystate.MaterializationRecord{}, err
+	return v, err
 }
-
-func (s Service) loadMaterializationRecordForSync(ctx context.Context, root string) (repositorystate.MaterializationRecord, error) {
-	record, err := s.store.LoadMaterializationRecord(ctx, root)
-	if err == nil {
-		return record, nil
-	}
-
-	var stateErr repositorystate.StateFileError
-	if errors.As(err, &stateErr) &&
-		stateErr.File == repositorystate.StateFileMaterializationRecord &&
-		stateErr.Kind == repositorystate.StateFileErrorNotFound {
-		return repositorystate.MaterializationRecord{}, fmt.Errorf("sync requires existing materialization record")
-	}
-
-	return repositorystate.MaterializationRecord{}, err
+func stateNotFound(err error, file repositorystate.StateFile) bool {
+	var e repositorystate.StateFileError
+	return errors.As(err, &e) && e.File == file && e.Kind == repositorystate.StateFileErrorNotFound
 }
-
-func isApprovedSource(policy repositorystate.TrustPolicy, identity repositorystate.SourceIdentity) bool {
-	for _, approved := range policy.ApprovedSources {
-		if approved == identity {
+func approved(policy repositorystate.TrustPolicy, source repositorystate.SourceIdentity) bool {
+	for _, a := range policy.ApprovedSources {
+		if a == source {
 			return true
 		}
 	}
-
 	return false
 }
-
-func ensureNoManagedArtifactRemoval(record repositorystate.MaterializationRecord, desired repositorystate.ManagedArtifactKey) error {
-	for _, artifact := range record.Artifacts {
-		if artifact.Key != desired {
-			return ManagedArtifactRemovalError{Artifact: artifact.Key}
-		}
-	}
-
-	return nil
+func outsideRoot(identity repositorystate.SourceIdentity) bool {
+	return filepath.IsAbs(filepath.FromSlash(identity.Locator))
 }
-
-func selectArtifact(artifacts []source.ArtifactDescriptor, wanted string) (source.ArtifactDescriptor, error) {
-	if wanted != "" {
-		for _, artifact := range artifacts {
-			if artifact.Name == wanted {
-				return artifact, nil
-			}
-		}
-
-		return source.ArtifactDescriptor{}, fmt.Errorf("artifact %q was not found", wanted)
-	}
-
-	if len(artifacts) != 1 {
-		return source.ArtifactDescriptor{}, fmt.Errorf("install target must resolve to exactly one artifact")
-	}
-
-	return artifacts[0], nil
-}
-
-func findResolution(lockfile repositorystate.Lockfile, sourceID repositorystate.SourceIdentity, artifact string) (repositorystate.Resolution, error) {
-	for _, resolution := range lockfile.Resolutions {
-		if resolution.Source == sourceID && resolution.Artifact.Name == artifact {
-			return resolution, nil
-		}
-	}
-	return repositorystate.Resolution{}, fmt.Errorf("sync requires a matching persisted resolution")
-}
-
-func allFileChangesUnchanged(changes []materialize.FileChange) bool {
-	if len(changes) == 0 {
-		return true
-	}
-	for _, change := range changes {
-		if change.Action != "unchanged" {
-			return false
-		}
-	}
-	return true
-}
-
-func rollbackCreatedFiles(paths []string) {
-	for _, path := range paths {
-		_ = os.Remove(path)
-	}
+func resultForConflicts(operation string, count int, conflicts []Conflict) Result {
+	return Result{Operation: operation, Outcome: OutcomeConflict, ArtifactCount: count, Conflicts: conflicts}
 }

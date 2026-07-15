@@ -1,71 +1,33 @@
 package install
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
 	"github.com/talby/talby-bootstrap/internal/source"
 )
 
-func TestRepositoryStateDeclarationFromInstallResult(t *testing.T) {
-	req := Request{
-		Source:   source.Ref{Type: "file", Locator: "/tmp/example", Version: "v1.2.3"},
-		Artifact: "base-readme",
+func TestRepositoryStateDeclarationFromInstallRequest(t *testing.T) {
+	identity := repositorystate.SourceIdentity{Type: "file", Locator: "source"}
+	if got := declarationFor(Request{Artifact: "a"}, identity); got.Target != (repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeArtifact, Artifact: "a"}) {
+		t.Fatalf("declarationFor() = %#v", got)
 	}
-	result := Result{
-		Source: source.Identity{
-			Type:    "file",
-			Name:    "local-example-source",
-			Version: "local-snapshot-001",
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name:    "base-readme",
-			Version: "1.0.0",
-			Path:    "artifacts/base-readme",
-		},
-	}
-
-	got := ManifestDeclaration(req, result)
-	want := repositorystate.Declaration{
-		Source: repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-		Target: repositorystate.DeclarationTarget{
-			Scope:    repositorystate.DeclarationScopeArtifact,
-			Artifact: "base-readme",
-		},
-		Input: &repositorystate.SourceInput{
-			Locator: "/tmp/example",
-			Version: "v1.2.3",
-		},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ManifestDeclaration() = %#v, want %#v", got, want)
+	if got := declarationFor(Request{}, identity); got.Target != (repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeSource}) {
+		t.Fatalf("source declaration = %#v", got)
 	}
 }
 
-func TestRepositoryStateResolutionFromInstallResult(t *testing.T) {
-	result := Result{
-		Source: source.Identity{
-			Type:    "file",
-			Name:    "local-example-source",
-			Version: "local-snapshot-001",
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name:    "base-readme",
-			Version: "1.0.0",
-		},
+func TestRepositoryStateResolutionGroupsSelectedArtifacts(t *testing.T) {
+	identity := repositorystate.SourceIdentity{Type: "file", Locator: "source"}
+	got := resolutionFor(identity, source.ResolvedSource{Identity: source.Identity{Version: "v"}}, []source.ArtifactDescriptor{{Name: "a", Version: "1"}, {Name: "b", Version: "2"}})
+	if got.ResolvedVersion != "v" || len(got.Artifacts) != 2 {
+		t.Fatalf("resolutionFor() = %#v", got)
 	}
+}
 
-	got := LockfileResolution(result)
-	want := repositorystate.Resolution{
-		Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-		ResolvedVersion: "local-snapshot-001",
-		Artifact: repositorystate.ArtifactResolution{
-			Name:    "base-readme",
-			Version: "1.0.0",
-		},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LockfileResolution() = %#v, want %#v", got, want)
+func TestRepositoryStateManagedRecordPreservesArtifactVersion(t *testing.T) {
+	got := managedRecordFor(repositorystate.SourceIdentity{Type: "file", Locator: "source"}, source.ResolvedSource{Identity: source.Identity{Version: "v"}}, source.ArtifactDescriptor{Name: "a", Version: "1"}, nil)
+	if got.ArtifactVersion != "1" || got.ResolvedVersion != "v" {
+		t.Fatalf("managedRecordFor() = %#v", got)
 	}
 }

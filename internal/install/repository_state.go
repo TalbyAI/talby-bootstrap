@@ -1,62 +1,28 @@
 package install
 
 import (
-	"github.com/talby/talby-bootstrap/internal/materialize"
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
+	"github.com/talby/talby-bootstrap/internal/source"
 )
 
-func ManifestDeclaration(req Request, result Result) repositorystate.Declaration {
-	return repositorystate.Declaration{
-		Source: repositorystate.SourceIdentity{
-			Type: result.Source.Type,
-			Name: result.Source.Name,
-		},
-		Target: repositorystate.DeclarationTarget{
-			Scope:    repositorystate.DeclarationScopeArtifact,
-			Artifact: result.Artifact.Name,
-		},
-		Input: &repositorystate.SourceInput{
-			Locator: req.Source.Locator,
-			Version: req.Source.Version,
-		},
+func declarationFor(request Request, identity repositorystate.SourceIdentity) repositorystate.Declaration {
+	target := repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeSource}
+	if request.Artifact != "" {
+		target = repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeArtifact, Artifact: request.Artifact}
 	}
+	d := repositorystate.Declaration{Source: identity, Target: target}
+	if request.Source.Locator != identity.Locator {
+		d.Input = &repositorystate.SourceInput{Locator: request.Source.Locator}
+	}
+	return d
 }
-
-func LockfileResolution(result Result) repositorystate.Resolution {
-	return repositorystate.Resolution{
-		Source: repositorystate.SourceIdentity{
-			Type: result.Source.Type,
-			Name: result.Source.Name,
-		},
-		ResolvedVersion: result.Source.Version,
-		Artifact: repositorystate.ArtifactResolution{
-			Name:    result.Artifact.Name,
-			Version: result.Artifact.Version,
-		},
+func resolutionFor(identity repositorystate.SourceIdentity, resolved source.ResolvedSource, artifacts []source.ArtifactDescriptor) repositorystate.Resolution {
+	out := repositorystate.Resolution{Source: identity, ResolvedVersion: resolved.Identity.Version, Artifacts: make([]repositorystate.ArtifactResolution, 0, len(artifacts))}
+	for _, a := range artifacts {
+		out.Artifacts = append(out.Artifacts, repositorystate.ArtifactResolution{Name: a.Name, Version: a.Version})
 	}
+	return out
 }
-
-func ManagedArtifactKeyFor(result Result) repositorystate.ManagedArtifactKey {
-	return repositorystate.ManagedArtifactKey{
-		Source: repositorystate.SourceIdentity{
-			Type: result.Source.Type,
-			Name: result.Source.Name,
-		},
-		ResolvedVersion: result.Source.Version,
-		Artifact:        result.Artifact.Name,
-	}
-}
-
-func ManagedArtifactRecordFor(result Result, matResult materialize.Result) repositorystate.ManagedArtifactRecord {
-	files := make([]repositorystate.ManagedFileRecord, 0, len(matResult.Changes))
-	for _, change := range matResult.Changes {
-		files = append(files, repositorystate.ManagedFileRecord{
-			Path:   change.Path,
-			Digest: change.Digest,
-		})
-	}
-	return repositorystate.ManagedArtifactRecord{
-		Key:   ManagedArtifactKeyFor(result),
-		Files: files,
-	}
+func managedRecordFor(identity repositorystate.SourceIdentity, resolved source.ResolvedSource, artifact source.ArtifactDescriptor, files []repositorystate.ManagedFileRecord) repositorystate.ManagedArtifactRecord {
+	return repositorystate.ManagedArtifactRecord{Source: identity, ResolvedVersion: resolved.Identity.Version, Artifact: artifact.Name, ArtifactVersion: artifact.Version, Files: files}
 }

@@ -4,311 +4,216 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/talby/talby-bootstrap/internal/source"
 )
 
-func TestResolveLoadsSourceIdentityAndArtifacts(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: README.md\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "README.md"), "hello\n")
-
-	resolved, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
-	}
-	if resolved.Identity.Type != "file" {
-		t.Fatalf("Identity.Type = %q, want file", resolved.Identity.Type)
-	}
-	if resolved.Identity.Name != "local-example-source" {
-		t.Fatalf("Identity.Name = %q, want local-example-source", resolved.Identity.Name)
-	}
-	if !strings.HasPrefix(resolved.Identity.Version, "local-snapshot-") {
-		t.Fatalf("Identity.Version = %q, want local-snapshot-*", resolved.Identity.Version)
-	}
-	if resolved.SourcePath != root {
-		t.Fatalf("SourcePath = %q, want %q", resolved.SourcePath, root)
-	}
-	if len(resolved.Artifacts) != 1 || resolved.Artifacts[0].Version != "1.0.0" {
-		t.Fatalf("Artifacts = %#v, want one versioned artifact", resolved.Artifacts)
-	}
-	if resolved.Artifacts[0].Name != "base-readme" {
-		t.Fatalf("Artifacts[0].Name = %q, want base-readme", resolved.Artifacts[0].Name)
-	}
-	if resolved.Artifacts[0].Path != "artifacts/base-readme" {
-		t.Fatalf("Artifacts[0].Path = %q, want artifacts/base-readme", resolved.Artifacts[0].Path)
-	}
-	if len(resolved.Artifacts[0].Steps) != 1 {
-		t.Fatalf("len(Artifacts[0].Steps) = %d, want 1", len(resolved.Artifacts[0].Steps))
-	}
-	if got := resolved.Artifacts[0].Steps[0]; got.TargetPath != "README.md" || !strings.HasSuffix(got.SourcePath, "/artifacts/base-readme/README.md") {
-		t.Fatalf("Artifacts[0].Steps[0] = %#v, want resolved whole-file source path", got)
-	}
-}
-
-func TestCapabilitiesDescribeLocalFileSource(t *testing.T) {
-	got := New().Capabilities()
-	want := source.Capabilities{
-		SupportsVersions:   false,
-		ProvidesIdentity:   true,
-		ProvidesTimestamp:  false,
-		EnumeratesVersions: false,
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Capabilities() = %#v, want %#v", got, want)
-	}
-}
-
-func TestResolveChangesSnapshotVersionWhenResolvedContentChanges(t *testing.T) {
-	firstRoot := t.TempDir()
-	writeFile(t, filepath.Join(firstRoot, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(firstRoot, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: README.md\n")
-	writeFile(t, filepath.Join(firstRoot, "artifacts", "base-readme", "README.md"), "hello\n")
-
-	secondRoot := t.TempDir()
-	writeFile(t, filepath.Join(secondRoot, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(secondRoot, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: README.md\n")
-	writeFile(t, filepath.Join(secondRoot, "artifacts", "base-readme", "README.md"), "different\n")
-
-	firstResolved, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: firstRoot},
-	})
-	if err != nil {
-		t.Fatalf("Resolve() first error = %v", err)
-	}
-
-	secondResolved, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: secondRoot},
-	})
-	if err != nil {
-		t.Fatalf("Resolve() second error = %v", err)
-	}
-
-	if firstResolved.Identity.Version == secondResolved.Identity.Version {
-		t.Fatalf("Identity.Version = %q for both roots, want different snapshot hashes", firstResolved.Identity.Version)
-	}
-}
-
-func TestResolveRejectsFileStepMissingFields(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want missing file step source error")
-	}
-	if !strings.Contains(err.Error(), "file step source") {
-		t.Fatalf("Resolve() error = %q, want file step source validation error", err)
-	}
-}
-
-func TestResolveRejectsFileStepSourceOutsideArtifactDir(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: file\n    path: README.md\n    source: ../secret.txt\n")
-	writeFile(t, filepath.Join(root, "artifacts", "secret.txt"), "shh\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want file step source path escape error")
-	}
-	if !strings.Contains(err.Error(), "file step source must stay within artifact directory") {
-		t.Fatalf("Resolve() error = %q, want file step source path escape error", err)
-	}
-}
-
-func TestResolveRejectsUnsupportedStepTypes(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\nsteps:\n  - type: script\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want unsupported step type error")
-	}
-	if !strings.Contains(err.Error(), `unsupported step type "script"`) {
-		t.Fatalf("Resolve() error = %q, want unsupported step type error", err)
-	}
-}
-
-func TestResolveRejectsMissingArtifactDescriptor(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want missing talby-artifact.yaml error")
-	}
-	if !strings.Contains(err.Error(), "read ") || !strings.Contains(err.Error(), "talby-artifact.yaml") {
-		t.Fatalf("Resolve() error = %q, want wrapped read talby-artifact.yaml error", err)
-	}
-}
-
-func TestResolveRejectsInvalidSourceDescriptor(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource: [\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want parse talby-source.yaml error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "talby-source.yaml") {
-		t.Fatalf("Resolve() error = %q, want wrapped parse talby-source.yaml error", err)
-	}
-}
-
-func TestResolveRejectsArtifactPathOutsideSourceRoot(t *testing.T) {
-	root := t.TempDir()
-	outside := filepath.Join(root, "..", "outside-artifact")
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: ../outside-artifact\n")
-	writeFile(t, filepath.Join(outside, "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want artifact path escape error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "artifact path") {
-		t.Fatalf("Resolve() error = %q, want parse artifact path error", err)
-	}
-}
-
-func TestResolveRejectsMismatchedArtifactNames(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: different-name\n  version: 1.0.0\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want artifact name mismatch error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "artifact name") {
-		t.Fatalf("Resolve() error = %q, want parse artifact name mismatch error", err)
-	}
-}
-
-func TestResolveRejectsUnsupportedSchemaVersion(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 2\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want unsupported schema version error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "schema_version") {
-		t.Fatalf("Resolve() error = %q, want parse schema_version error", err)
-	}
-}
-
-func TestResolveRejectsMissingRequiredFields(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: \nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want missing required field error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "source name") {
-		t.Fatalf("Resolve() error = %q, want parse source name error", err)
-	}
-}
-
-func TestResolveRejectsMissingArtifactPath(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: \"\"\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want missing artifact path error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "artifact path") {
-		t.Fatalf("Resolve() error = %q, want parse artifact path error", err)
-	}
-}
-
-func TestResolveRejectsMissingArtifactName(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: \"\"\n  version: 1.0.0\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want missing artifact name error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "artifact name") {
-		t.Fatalf("Resolve() error = %q, want parse artifact name error", err)
-	}
-}
-
-func TestResolveRejectsMissingArtifactVersion(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: \"\"\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want missing artifact version error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "artifact version") {
-		t.Fatalf("Resolve() error = %q, want parse artifact version error", err)
-	}
-}
-
-func TestResolveRejectsDuplicateArtifactNames(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n  - name: base-readme\n    path: artifacts/alternate-readme\n")
-	writeFile(t, filepath.Join(root, "artifacts", "base-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 1.0.0\n")
-	writeFile(t, filepath.Join(root, "artifacts", "alternate-readme", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: base-readme\n  version: 2.0.0\n")
-
-	_, err := New().Resolve(context.Background(), source.ResolveRequest{
-		Ref: source.Ref{Type: "file", Locator: root},
-	})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want duplicate artifact name error")
-	}
-	if !strings.Contains(err.Error(), "parse ") || !strings.Contains(err.Error(), "duplicate artifact name") {
-		t.Fatalf("Resolve() error = %q, want duplicate artifact name error", err)
-	}
-}
-
-func writeFile(t *testing.T, path string, contents string) {
+func write(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) error = %v", path, err)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+func fixture(t *testing.T) string {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts:\n  - name: a\n    path: a\n")
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    path: out\n    source: in\n")
+	write(t, filepath.Join(root, "a", "in"), "captured\n")
+	return root
+}
+func TestResolveRejectsRequestedVersion(t *testing.T) {
+	_, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: fixture(t), Version: "v"}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+func TestResolveCapturesFileBytesAndEveryInputPath(t *testing.T) {
+	root := fixture(t)
+	got, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Type: "file", Locator: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Artifacts[0].Steps[0].SourceBytes) != "captured\n" {
+		t.Fatalf("SourceBytes = %q, want captured bytes", got.Artifacts[0].Steps[0].SourceBytes)
+	}
+	if len(got.InputPaths) != 3 {
+		t.Fatalf("InputPaths count = %d, want source descriptor, artifact descriptor, and step input", len(got.InputPaths))
+	}
+}
+func TestResolveFramesSnapshotPayloads(t *testing.T) {
+	root := fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    path: a\n    source: one\n  - type: file\n    path: b\n    source: two\n")
+	write(t, filepath.Join(root, "a", "one"), "x")
+	write(t, filepath.Join(root, "a", "two"), "b\x00z")
+	first, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	write(t, filepath.Join(root, "a", "one"), "xb\x00")
+	write(t, filepath.Join(root, "a", "two"), "z")
+	second, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Identity.Version == second.Identity.Version {
+		t.Fatalf("snapshot versions match for different payloads: %q", first.Identity.Version)
+	}
+}
+func TestResolveRejectsEmptySourceArtifactList(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts: []\n")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestResolveRejectsArtifactWithoutSteps(t *testing.T) {
+	root := fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps: []\n")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("Resolve() error = nil, want empty-step rejection")
+	}
+}
+
+func TestResolveParsesUnsupportedStepWithoutRejectingSource(t *testing.T) {
+	root := fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: prompt\n    path: ignored\n")
+	got, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}})
+	if err != nil || got.Artifacts[0].Steps[0].Type != "prompt" {
+		t.Fatalf("Resolve() = %#v, %v", got, err)
+	}
+}
+
+func TestResolveRejectsArtifactSymlinkEscapingSourceRoot(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts:\n  - name: a\n    path: a\n")
+	if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("Resolve() error = nil, want containment rejection")
+	}
+}
+
+func TestResolveRejectsStepInputSymlinkEscapingArtifactRoot(t *testing.T) {
+	root, outside := fixture(t), t.TempDir()
+	write(t, filepath.Join(outside, "input"), "outside")
+	if err := os.Remove(filepath.Join(root, "a", "in")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "input"), filepath.Join(root, "a", "in")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("Resolve() error = nil, want containment rejection")
+	}
+}
+
+func TestResolveRejectsSourceDescriptorSymlinkEscapingSourceRoot(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(outside, "source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts: []\n")
+	if err := os.Symlink(filepath.Join(outside, "source.yaml"), filepath.Join(root, "talby-source.yaml")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("Resolve() error = nil, want containment rejection")
+	}
+}
+
+func TestResolveRejectsArtifactDescriptorSymlinkEscapingArtifactRoot(t *testing.T) {
+	root, outside := fixture(t), t.TempDir()
+	write(t, filepath.Join(outside, "artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps: []\n")
+	if err := os.Remove(filepath.Join(root, "a", "talby-artifact.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "artifact.yaml"), filepath.Join(root, "a", "talby-artifact.yaml")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("Resolve() error = nil, want containment rejection")
+	}
+}
+
+func TestCapabilitiesProvideIdentity(t *testing.T) {
+	if !New().Capabilities().ProvidesIdentity {
+		t.Fatal("file source must provide identity")
+	}
+}
+
+func TestValidateSourceDescriptorRejectsInvalidFieldsAndDuplicates(t *testing.T) {
+	valid := sourceDescriptor{SchemaVersion: supportedSchemaVersion, Artifacts: []artifactRef{{Name: "a", Path: "a"}}}
+	valid.Source.Name = "source"
+	invalidSchema := valid
+	invalidSchema.SchemaVersion = 2
+	if validateSourceDescriptor(invalidSchema) == nil {
+		t.Fatal("expected schema rejection")
+	}
+	missingName := valid
+	missingName.Source.Name = ""
+	if validateSourceDescriptor(missingName) == nil {
+		t.Fatal("expected source name rejection")
+	}
+	incomplete := valid
+	incomplete.Artifacts = append([]artifactRef(nil), valid.Artifacts...)
+	incomplete.Artifacts[0].Path = ""
+	if validateSourceDescriptor(incomplete) == nil {
+		t.Fatal("expected incomplete artifact rejection")
+	}
+	duplicate := valid
+	duplicate.Artifacts = append(duplicate.Artifacts, artifactRef{Name: "a", Path: "other"})
+	if err := validateSourceDescriptor(duplicate); err == nil || err.Error() != `duplicate artifact name "a"` {
+		t.Fatalf("validateSourceDescriptor() error = %v, want duplicate artifact rejection", err)
+	}
+}
+
+func TestValidateArtifactDescriptorRejectsSchemaNameAndVersion(t *testing.T) {
+	ref := artifactRef{Name: "a", Path: "a"}
+	valid := artifactDescriptor{SchemaVersion: supportedSchemaVersion, Steps: []artifactStep{{Type: "file", Path: "out", Source: "in"}}}
+	valid.Artifact.Name, valid.Artifact.Version = "a", "1"
+	invalidSchema := valid
+	invalidSchema.SchemaVersion = 2
+	if validateArtifactDescriptor(ref, invalidSchema) == nil {
+		t.Fatal("expected schema rejection")
+	}
+	wrongName := valid
+	wrongName.Artifact.Name = "b"
+	if validateArtifactDescriptor(ref, wrongName) == nil {
+		t.Fatal("expected name rejection")
+	}
+	missingVersion := valid
+	missingVersion.Artifact.Version = ""
+	if validateArtifactDescriptor(ref, missingVersion) == nil {
+		t.Fatal("expected version rejection")
+	}
+}
+
+func TestResolveRejectsMalformedDescriptorsAndFileSteps(t *testing.T) {
+	root := fixture(t)
+	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: [")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected malformed source descriptor")
+	}
+
+	root = fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: [")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected malformed artifact descriptor")
+	}
+
+	root = fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    source: in\n")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected missing target path rejection")
+	}
+
+	root = fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    path: out\n")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected missing source rejection")
 	}
 }

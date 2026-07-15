@@ -1,283 +1,332 @@
 package materialize
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/talby/talby-bootstrap/internal/repositorystate"
-	"github.com/talby/talby-bootstrap/internal/source"
 )
 
-func TestApplyWritesManagedFiles(t *testing.T) {
+func TestObserveCanonicalizesAbsentAndRegularTargets(t *testing.T) {
 	root := t.TempDir()
-	sourcePath := filepath.Join(root, "source.txt")
-	if err := os.WriteFile(sourcePath, []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(source) error = %v", err)
+	got, err := Observe(root, "a/b")
+	if err != nil || got.Kind != EntryAbsent {
+		t.Fatalf("%#v %v", got, err)
 	}
-
-	result, err := Apply(context.Background(), Request{
-		Root: root,
-		Key: repositorystate.ManagedArtifactKey{
-			Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-			ResolvedVersion: "local-snapshot-001",
-			Artifact:        "base-readme",
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name: "base-readme",
-			Steps: []source.MaterializationStep{{
-				Type:       "file",
-				TargetPath: "README.md",
-				SourcePath: sourcePath,
-			}},
-		},
-	})
+	if err := os.WriteFile(filepath.Join(root, "a"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = Observe(root, "a")
+	if err != nil || got.Kind != EntryRegular {
+		t.Fatalf("%#v %v", got, err)
+	}
+}
+func TestWriteRejectsChangedTargetSinceObservation(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := Observe(root, "README.md")
 	if err != nil {
-		t.Fatalf("Apply() error = %v", err)
+		t.Fatal(err)
 	}
-	if len(result.Changes) != 1 || result.Changes[0].Action != "created" {
-		t.Fatalf("Changes = %#v, want one created change", result.Changes)
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("changed"), 0644); err != nil {
+		t.Fatal(err)
 	}
-	if bytes, err := os.ReadFile(filepath.Join(root, "README.md")); err != nil || string(bytes) != "hello\n" {
-		t.Fatalf("ReadFile(README.md) = %q, %v, want hello", bytes, err)
+	err = Write(observed, []byte("desired"))
+	var changed ChangedSincePreflightError
+	if !errors.As(err, &changed) {
+		t.Fatalf("Write() error = %T %v, want ChangedSincePreflightError", err, err)
 	}
 }
 
-func TestApplyLeavesIdenticalFileUnchanged(t *testing.T) {
-	root := t.TempDir()
-	sourcePath := filepath.Join(root, "source.txt")
-	if err := os.WriteFile(sourcePath, []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(source) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(target) error = %v", err)
-	}
-
-	result, err := Apply(context.Background(), Request{
-		Root: root,
-		Key: repositorystate.ManagedArtifactKey{
-			Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-			ResolvedVersion: "local-snapshot-001",
-			Artifact:        "base-readme",
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name: "base-readme",
-			Steps: []source.MaterializationStep{{
-				Type:       "file",
-				TargetPath: "README.md",
-				SourcePath: sourcePath,
-			}},
-		},
-	})
+func TestWriteClassifiesParentTopologyRaceAsChanged(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	observed, err := Observe(root, "parent/target")
 	if err != nil {
-		t.Fatalf("Apply() error = %v", err)
+		t.Fatal(err)
 	}
-	if len(result.Changes) != 1 || result.Changes[0].Action != "unchanged" {
-		t.Fatalf("Changes = %#v, want one unchanged change", result.Changes)
+	if err := os.Symlink(outside, filepath.Join(root, "parent")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+
+	err = Write(observed, []byte("desired"))
+	var changed ChangedSincePreflightError
+	if !errors.As(err, &changed) {
+		t.Fatalf("Write() error = %T %v, want ChangedSincePreflightError", err, err)
 	}
 }
 
-func TestApplyUpdatesTrackedFileWhenDigestMatchesRecordedState(t *testing.T) {
-	root := t.TempDir()
-	sourcePath := filepath.Join(root, "source.txt")
-	if err := os.WriteFile(sourcePath, []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(source) error = %v", err)
+func TestObserveRejectsExistingSymlinkPathComponent(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Skipf("symlink: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("old\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(target) error = %v", err)
+	if _, err := Observe(root, "link/file"); err == nil {
+		t.Fatal("Observe() error = nil, want symlink parent rejection")
 	}
+}
 
-	result, err := Apply(context.Background(), Request{
-		Root: root,
-		Key: repositorystate.ManagedArtifactKey{
-			Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-			ResolvedVersion: "local-snapshot-001",
-			Artifact:        "base-readme",
-		},
-		Record: repositorystate.MaterializationRecord{
-			Artifacts: []repositorystate.ManagedArtifactRecord{{
-				Key: repositorystate.ManagedArtifactKey{
-					Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-					ResolvedVersion: "local-snapshot-001",
-					Artifact:        "base-readme",
-				},
-				Files: []repositorystate.ManagedFileRecord{{
-					Path:   "README.md",
-					Digest: "01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee",
-				}},
-			}},
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name: "base-readme",
-			Steps: []source.MaterializationStep{{
-				Type:       "file",
-				TargetPath: "README.md",
-				SourcePath: sourcePath,
-			}},
-		},
-	})
+func TestObserveReportsFinalSymlinkAndNonRegularTargets(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Symlink("target", filepath.Join(root, "link")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if got, err := Observe(root, "link"); err != nil || got.Kind != EntrySymlink {
+		t.Fatalf("Observe(link) = %#v, %v", got, err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Observe(root, "dir"); err != nil || got.Kind != EntryOther {
+		t.Fatalf("Observe(dir) = %#v, %v", got, err)
+	}
+}
+
+func TestWriteCreatesWithMode0644(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "new")
 	if err != nil {
-		t.Fatalf("Apply() error = %v", err)
+		t.Fatal(err)
 	}
-	if len(result.Changes) != 1 || result.Changes[0].Action != "updated" {
-		t.Fatalf("Changes = %#v, want one updated change", result.Changes)
+	if err := Write(observed, []byte("new")); err != nil {
+		t.Fatal(err)
 	}
-	if got, err := os.ReadFile(filepath.Join(root, "README.md")); err != nil || string(got) != "hello\n" {
-		t.Fatalf("ReadFile(README.md) = %q, %v, want hello", got, err)
-	}
-}
-
-func TestApplyStopsWhenAnotherManagedArtifactOwnsTargetFile(t *testing.T) {
-	root := t.TempDir()
-	sourcePath := filepath.Join(root, "source.txt")
-	if err := os.WriteFile(sourcePath, []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(source) error = %v", err)
-	}
-
-	_, err := Apply(context.Background(), Request{
-		Root: root,
-		Key: repositorystate.ManagedArtifactKey{
-			Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-			ResolvedVersion: "local-snapshot-001",
-			Artifact:        "base-readme",
-		},
-		Record: repositorystate.MaterializationRecord{
-			Artifacts: []repositorystate.ManagedArtifactRecord{{
-				Key: repositorystate.ManagedArtifactKey{
-					Source:          repositorystate.SourceIdentity{Type: "file", Name: "other-source"},
-					ResolvedVersion: "local-snapshot-999",
-					Artifact:        "other-artifact",
-				},
-				Files: []repositorystate.ManagedFileRecord{{Path: "README.md", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
-			}},
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name: "base-readme",
-			Steps: []source.MaterializationStep{{
-				Type:       "file",
-				TargetPath: "README.md",
-				SourcePath: sourcePath,
-			}},
-		},
-	})
-	if err == nil {
-		t.Fatal("Apply() error = nil, want ownership conflict")
-	}
-
-	var conflict OwnershipConflictError
-	if !errors.As(err, &conflict) {
-		t.Fatalf("error = %T, want OwnershipConflictError", err)
+	info, err := os.Stat(filepath.Join(root, "new"))
+	if err != nil || info.Mode().Perm() != 0644 {
+		t.Fatalf("mode = %v, %v", info.Mode(), err)
 	}
 }
 
-func TestApplyStopsWhenTrackedFileHasDrifted(t *testing.T) {
+func TestWritePreservesExistingMode(t *testing.T) {
 	root := t.TempDir()
-	sourcePath := filepath.Join(root, "source.txt")
-	if err := os.WriteFile(sourcePath, []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(source) error = %v", err)
+	path := filepath.Join(root, "old")
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("user edit\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(target) error = %v", err)
+	observed, err := Observe(root, "old")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	_, err := Apply(context.Background(), Request{
-		Root: root,
-		Key: repositorystate.ManagedArtifactKey{
-			Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-			ResolvedVersion: "local-snapshot-001",
-			Artifact:        "base-readme",
-		},
-		Record: repositorystate.MaterializationRecord{
-			Artifacts: []repositorystate.ManagedArtifactRecord{{
-				Key: repositorystate.ManagedArtifactKey{
-					Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-					ResolvedVersion: "local-snapshot-001",
-					Artifact:        "base-readme",
-				},
-				Files: []repositorystate.ManagedFileRecord{{
-					Path:   "README.md",
-					Digest: "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2fcbbfc4017",
-				}},
-			}},
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name: "base-readme",
-			Steps: []source.MaterializationStep{{
-				Type:       "file",
-				TargetPath: "README.md",
-				SourcePath: sourcePath,
-			}},
-		},
-	})
-	if err == nil {
-		t.Fatal("Apply() error = nil, want drift conflict")
+	if err := Write(observed, []byte("new")); err != nil {
+		t.Fatal(err)
 	}
-
-	var drift DriftError
-	if !errors.As(err, &drift) {
-		t.Fatalf("error = %T, want DriftError", err)
-	}
-	if !strings.Contains(err.Error(), "README.md") {
-		t.Fatalf("error = %q, want path in message", err)
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("mode = %v, %v", info.Mode(), err)
 	}
 }
 
-func TestApplyRejectsTargetPathOutsideOperationRoot(t *testing.T) {
+func TestWriteReplacesThroughTemporaryFileInTargetDirectory(t *testing.T) {
 	root := t.TempDir()
-	sourcePath := filepath.Join(root, "source.txt")
-	if err := os.WriteFile(sourcePath, []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(source) error = %v", err)
+	if err := os.Mkdir(filepath.Join(root, "nested"), 0755); err != nil {
+		t.Fatal(err)
 	}
-
-	_, err := Apply(context.Background(), Request{
-		Root: root,
-		Key: repositorystate.ManagedArtifactKey{
-			Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-			ResolvedVersion: "local-snapshot-001",
-			Artifact:        "base-readme",
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name: "base-readme",
-			Steps: []source.MaterializationStep{{
-				Type:       "file",
-				TargetPath: "../README.md",
-				SourcePath: sourcePath,
-			}},
-		},
-	})
-	if err == nil {
-		t.Fatal("Apply() error = nil, want target path escape error")
+	observed, err := Observe(root, "nested/file")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, want := err.Error(), "file target path must stay within operation root"; got != want {
-		t.Fatalf("Apply() error = %q, want %q", got, want)
+	if err := Write(observed, []byte("content")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "nested", "file")); err != nil || string(got) != "content" {
+		t.Fatalf("file = %q, %v", got, err)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "nested", ".file.*.tmp"))
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("temporary files = %v, %v", matches, err)
 	}
 }
 
-func TestApplyRejectsUnsupportedStepTypes(t *testing.T) {
+func TestWriteRootedStaysWithOpenedOperationRoot(t *testing.T) {
 	root := t.TempDir()
-
-	_, err := Apply(context.Background(), Request{
-		Root: root,
-		Key: repositorystate.ManagedArtifactKey{
-			Source:          repositorystate.SourceIdentity{Type: "file", Name: "local-example-source"},
-			ResolvedVersion: "local-snapshot-001",
-			Artifact:        "base-readme",
-		},
-		Artifact: source.ArtifactDescriptor{
-			Name: "base-readme",
-			Steps: []source.MaterializationStep{{
-				Type:       "script",
-				TargetPath: "README.md",
-			}},
-		},
-	})
-	if err == nil {
-		t.Fatal("Apply() error = nil, want unsupported step type error")
+	observed, err := Observe(root, "target")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, want := err.Error(), `unsupported step type "script"`; got != want {
-		t.Fatalf("Apply() error = %q, want %q", got, want)
+	opened, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = opened.Close() }()
+	moved := root + "-moved"
+	if err := os.Rename(root, moved); err != nil {
+		t.Skipf("rename opened root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeRooted(opened, observed, []byte("content")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(moved, "target")); err != nil || string(got) != "content" {
+		t.Fatalf("opened-root target = %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "target")); !os.IsNotExist(err) {
+		t.Fatalf("replacement-root target error = %v, want not exist", err)
+	}
+}
+
+func TestWriteRejectsReplacedOperationRoot(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := root + "-moved"
+	if err := os.Rename(root, moved); err != nil {
+		t.Skipf("rename operation root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Write(observed, []byte("content"))
+	var changed ChangedSincePreflightError
+	if !errors.As(err, &changed) {
+		t.Fatalf("Write() error = %T %v, want ChangedSincePreflightError", err, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "target")); !os.IsNotExist(err) {
+		t.Fatalf("replacement-root target error = %v, want not exist", err)
+	}
+}
+
+func TestObserveRejectsTargetsOutsideRootAndInvalidRoot(t *testing.T) {
+	root := t.TempDir()
+	for _, target := range []string{".", "..", "../outside", filepath.Join(root, "absolute")} {
+		if _, err := Observe(root, target); err == nil {
+			t.Fatalf("Observe(%q) error = nil", target)
+		}
+	}
+	if _, err := Observe(filepath.Join(root, "missing"), "file"); err == nil {
+		t.Fatal("expected invalid root error")
+	}
+}
+
+func TestObserveRejectsRegularFileAsParent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "parent"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Observe(root, "parent/file"); err == nil || err.Error() != "target parent must be a real directory" {
+		t.Fatalf("Observe() error = %v", err)
+	}
+}
+
+func TestPathKeyDigestAndErrorText(t *testing.T) {
+	if got := PathKey("a/../b"); got != "b" {
+		t.Fatalf("PathKey() = %q", got)
+	}
+	if got := Digest([]byte("content")); len(got) != 64 || strings.Trim(got, "0123456789abcdef") != "" {
+		t.Fatalf("Digest() = %q", got)
+	}
+	if got := (ChangedSincePreflightError{Path: "a"}).Error(); got != `target "a" changed after preflight` {
+		t.Fatalf("Error() = %q", got)
+	}
+}
+
+func TestRevalidateAcceptsSameObservationAndRejectsChanges(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Revalidate(observed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var changed ChangedSincePreflightError
+	if err := Revalidate(observed); !errors.As(err, &changed) {
+		t.Fatalf("Revalidate() error = %T %v", err, err)
+	}
+}
+
+func TestRevalidateClassifiesParentTopologyChange(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "parent/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "parent"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var changed ChangedSincePreflightError
+	if err := Revalidate(observed); !errors.As(err, &changed) {
+		t.Fatalf("Revalidate() error = %T %v, want ChangedSincePreflightError", err, err)
+	}
+}
+
+func TestRevalidateReturnsRootError(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := Revalidate(observed); !os.IsNotExist(err) {
+		t.Fatalf("Revalidate() error = %v, want not exist", err)
+	}
+}
+
+func TestWriteReplacesFinalSymlink(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "file")
+	if err := os.Symlink("missing", path); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	observed, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(observed, []byte("content")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "content" {
+		t.Fatalf("file = %q, %v", got, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("mode = %v, want regular file", info.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(root, "missing")); !os.IsNotExist(err) {
+		t.Fatalf("symlink target error = %v, want not exist", err)
+	}
+}
+
+func TestWriteRejectsRemovedOperationRoot(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(observed, []byte("content")); !os.IsNotExist(err) {
+		t.Fatalf("Write() error = %v, want not exist", err)
+	}
+}
+
+func TestSameObservationComparesAllStableFields(t *testing.T) {
+	base := Observation{Root: "root", Path: "path", AbsolutePath: "absolute", Kind: EntryRegular, Mode: 0o644, Digest: "digest"}
+	if !SameObservation(base, base) {
+		t.Fatal("identical observations differ")
+	}
+	changed := base
+	changed.Digest = "other"
+	if SameObservation(base, changed) {
+		t.Fatal("different observations match")
 	}
 }
