@@ -247,6 +247,78 @@ func TestRevalidateAcceptsSameObservationAndRejectsChanges(t *testing.T) {
 	}
 }
 
+func TestRevalidateClassifiesParentTopologyChange(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "parent/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "parent"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var changed ChangedSincePreflightError
+	if err := Revalidate(observed); !errors.As(err, &changed) {
+		t.Fatalf("Revalidate() error = %T %v, want ChangedSincePreflightError", err, err)
+	}
+}
+
+func TestRevalidateReturnsRootError(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := Revalidate(observed); !os.IsNotExist(err) {
+		t.Fatalf("Revalidate() error = %v, want not exist", err)
+	}
+}
+
+func TestWriteReplacesFinalSymlink(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "file")
+	if err := os.Symlink("missing", path); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	observed, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(observed, []byte("content")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "content" {
+		t.Fatalf("file = %q, %v", got, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("mode = %v, want regular file", info.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(root, "missing")); !os.IsNotExist(err) {
+		t.Fatalf("symlink target error = %v, want not exist", err)
+	}
+}
+
+func TestWriteRejectsRemovedOperationRoot(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(observed, []byte("content")); !os.IsNotExist(err) {
+		t.Fatalf("Write() error = %v, want not exist", err)
+	}
+}
+
 func TestSameObservationComparesAllStableFields(t *testing.T) {
 	base := Observation{Root: "root", Path: "path", AbsolutePath: "absolute", Kind: EntryRegular, Mode: 0o644, Digest: "digest"}
 	if !SameObservation(base, base) {

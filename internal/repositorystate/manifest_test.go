@@ -53,10 +53,16 @@ func TestNormalizeSourceIdentityRejectsIncompleteAndUnsupportedSources(t *testin
 	if _, err := NormalizeSourceIdentity(root, SourceIdentity{Type: "git", Locator: "x"}); err == nil {
 		t.Fatal("expected unsupported source rejection")
 	}
+	if _, err := NormalizeSourceIdentity(filepath.Join(root, "missing"), SourceIdentity{Type: SourceTypeFile, Locator: "x"}); err == nil {
+		t.Fatal("expected missing root rejection")
+	}
 }
 
 func TestAcquisitionLocatorRequiresNormalizedSource(t *testing.T) {
 	root := t.TempDir()
+	if _, err := AcquisitionLocator(root, SourceIdentity{Type: "git", Locator: "source"}); err == nil {
+		t.Fatal("expected unsupported source rejection")
+	}
 	if _, err := AcquisitionLocator(root, SourceIdentity{Type: SourceTypeFile, Locator: "./source"}); err == nil {
 		t.Fatal("expected unnormalized locator rejection")
 	}
@@ -84,13 +90,22 @@ func TestManifestAddDeclarationKindsAndConflicts(t *testing.T) {
 	if _, _, err := manifest.AddDeclaration(root, Declaration{Source: SourceIdentity{Type: "git", Locator: "source"}}); err == nil {
 		t.Fatal("expected invalid source")
 	}
+	if _, _, err := manifest.AddDeclaration(root, Declaration{Source: SourceIdentity{Type: SourceTypeFile, Locator: "source"}}); err == nil {
+		t.Fatal("expected invalid target")
+	}
 }
 
 func TestValidateManifestTargetsTrustAndDuplicates(t *testing.T) {
 	root := t.TempDir()
 	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+	if err := ValidateManifest(root, Manifest{TrustPolicy: TrustPolicy{ApprovedSources: []SourceIdentity{{Type: "git", Locator: "source"}}}}); err == nil {
+		t.Fatal("expected invalid approved source")
+	}
 	if err := ValidateManifest(root, Manifest{TrustPolicy: TrustPolicy{ApprovedSources: []SourceIdentity{{Type: SourceTypeFile, Locator: "./source"}}}}); err == nil {
 		t.Fatal("expected unnormalized approved source")
+	}
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: SourceIdentity{Type: "git", Locator: "source"}}}}); err == nil {
+		t.Fatal("expected invalid declaration source")
 	}
 	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: source}}}); err == nil {
 		t.Fatal("expected missing scope")
