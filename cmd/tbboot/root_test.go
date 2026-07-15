@@ -89,7 +89,9 @@ func TestSyncJSONOmitsChangesForNoOp(t *testing.T) {
 	initGitRepo(t, root)
 
 	withDir(t, root, func() {
-		execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{})
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup install exit code = %d, want 0", code)
+		}
 		var stdout bytes.Buffer
 		if code := execute(context.Background(), []string{"--output", "json", "install"}, &stdout, &bytes.Buffer{}); code != 0 {
 			t.Fatalf("exit code = %d, want 0", code)
@@ -114,7 +116,9 @@ func TestSyncJSONIncludesTypedEffectiveChanges(t *testing.T) {
 	initGitRepo(t, root)
 
 	withDir(t, root, func() {
-		execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme", "--declare-only"}, &bytes.Buffer{}, &bytes.Buffer{})
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme", "--declare-only"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup declare-only exit code = %d, want 0", code)
+		}
 		var stdout bytes.Buffer
 		if code := execute(context.Background(), []string{"--output", "json", "install"}, &stdout, &bytes.Buffer{}); code != 0 {
 			t.Fatalf("exit code = %d, want 0", code)
@@ -126,6 +130,34 @@ func TestSyncJSONIncludesTypedEffectiveChanges(t *testing.T) {
 		changes, ok := envelope.Details["changes"].([]any)
 		if !ok || len(changes) == 0 {
 			t.Fatalf("changes = %#v", envelope.Details["changes"])
+		}
+		seen := map[string]bool{}
+		for _, raw := range changes {
+			change, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("change = %#v, want object", raw)
+			}
+			source, ok := change["source"].(map[string]any)
+			locator, locatorOK := source["locator"].(string)
+			sourceVersion, versionOK := change["source_version"].(string)
+			artifact, artifactOK := change["artifact"].(string)
+			kind, kindOK := change["kind"].(string)
+			if !ok || source["type"] != "file" || !locatorOK || locator == "" || !versionOK || sourceVersion == "" || !artifactOK || artifact != "base-readme" || !kindOK {
+				t.Fatalf("change provenance = %#v", change)
+			}
+			seen[kind] = true
+			switch kind {
+			case "resolution_locked":
+			case "file_created":
+				if change["path"] != "README.md" || change["ownership_kind"] != "whole_file" {
+					t.Fatalf("file change = %#v", change)
+				}
+			default:
+				t.Fatalf("change kind = %#v", change["kind"])
+			}
+		}
+		if !seen["resolution_locked"] || !seen["file_created"] {
+			t.Fatalf("change kinds = %#v", seen)
 		}
 	})
 }
@@ -167,7 +199,9 @@ func TestSyncJSONIncludesAllTypedConflictsOnStderr(t *testing.T) {
 	initGitRepo(t, root)
 
 	withDir(t, root, func() {
-		execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{})
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup install exit code = %d, want 0", code)
+		}
 		writeTestFile(t, filepath.Join(root, "README.md"), "user edit\n")
 		var stdout, stderr bytes.Buffer
 		if code := execute(context.Background(), []string{"--output", "json", "install"}, &stdout, &stderr); code != int(app.ExitUserActionConflict) {
@@ -184,6 +218,25 @@ func TestSyncJSONIncludesAllTypedConflictsOnStderr(t *testing.T) {
 		if !ok || len(conflicts) == 0 {
 			t.Fatalf("conflicts = %#v", envelope.Details["conflicts"])
 		}
+		for _, raw := range conflicts {
+			conflict, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("conflict = %#v, want object", raw)
+			}
+			source, ok := conflict["source"].(map[string]any)
+			paths, pathsOK := conflict["paths"].([]any)
+			locator, locatorOK := source["locator"].(string)
+			artifact, artifactOK := conflict["artifact"].(string)
+			if conflict["kind"] != "drift" || !ok || source["type"] != "file" || !locatorOK || locator == "" || !artifactOK || artifact != "base-readme" || !pathsOK || len(paths) == 0 {
+				t.Fatalf("conflict fields = %#v", conflict)
+			}
+			for _, path := range paths {
+				value, ok := path.(string)
+				if !ok || value == "" {
+					t.Fatalf("conflict path = %#v", path)
+				}
+			}
+		}
 	})
 }
 
@@ -197,7 +250,9 @@ func TestSyncExitCodesForValidationConflictAndTrust(t *testing.T) {
 	writeInstallFixture(t, sourceRoot)
 	initGitRepo(t, root)
 	withDir(t, root, func() {
-		execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{})
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup install exit code = %d, want 0", code)
+		}
 		writeTestFile(t, filepath.Join(root, "README.md"), "user edit\n")
 		if code := execute(context.Background(), []string{"install"}, &bytes.Buffer{}, &bytes.Buffer{}); code != int(app.ExitUserActionConflict) {
 			t.Fatalf("conflict exit code = %d, want 2", code)
@@ -289,7 +344,9 @@ func TestRepeatedExplicitInstallDoesNotUpgradeSnapshot(t *testing.T) {
 	writeInstallFixture(t, sourceRoot)
 	initGitRepo(t, root)
 	withDir(t, root, func() {
-		execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{})
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup install exit code = %d, want 0", code)
+		}
 		writeTestFile(t, filepath.Join(sourceRoot, "artifacts", "base-readme", "README.md"), "changed\n")
 		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{}); code != int(app.ExitOperationalOrValidationError) {
 			t.Fatalf("exit code = %d, want 1", code)

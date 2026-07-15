@@ -240,7 +240,7 @@ Successful outcomes use exit code `0`:
 - `no_op` reports the reconciled Artifact count and omits the `changes` field;
 - `applied` reports the reconciled Artifact count and effective changes only, including lock pruning and ownership adoption when those are the only changes.
 
-Success details use one typed `changes` list with the minimum kinds `file_created`, `file_updated`, `ownership_adopted`, `resolution_locked`, and `lock_pruned`. Each entry includes Source and Artifact provenance plus a path when applicable. `resolution_locked` appears once per newly pinned declaration, with Artifact omitted for source scope. Unchanged files never appear in this list. Human output renders from the same effective-change model.
+Success details use one typed `changes` list with the minimum kinds `declaration_added`, `file_created`, `file_updated`, `ownership_adopted`, `resolution_locked`, and `lock_pruned`. Each entry includes Source and Artifact provenance plus a path when applicable. `resolution_locked` appears once per newly pinned declaration, with Artifact omitted for source scope. Unchanged files never appear in this list. Human output renders from the same effective-change model.
 
 Failures use existing exit-code classes:
 

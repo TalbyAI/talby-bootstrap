@@ -151,13 +151,10 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 		return Result{}, err
 	}
 	if request.DeclareOnly {
-		if kind == repositorystate.ChangeKindInserted {
-			if err := service.store.WriteManifest(ctx, request.Root, next); err != nil {
-				return Result{}, err
-			}
-			return Result{Operation: "install", Outcome: OutcomeApplied, ArtifactCount: len(selected), Changes: []Change{{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact}}}, nil
+		if err := service.store.WriteManifest(ctx, request.Root, next); err != nil {
+			return Result{}, err
 		}
-		return Result{Operation: "install", Outcome: OutcomeNoOp, ArtifactCount: len(selected)}, nil
+		return Result{Operation: "install", Outcome: OutcomeApplied, ArtifactCount: len(selected), Changes: []Change{{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact}}}, nil
 	}
 	lock, err := service.loadLockfileOrEmpty(ctx, request.Root)
 	if err != nil {

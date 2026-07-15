@@ -11,7 +11,7 @@ Keep `BACKLOG.md` as the single source of truth for ideas awaiting a product dec
 
 1. Locate `BACKLOG.md` at the repository root. If no backlog exists and the user is adding an idea, create it there using the format below. Complete when exactly one backlog is selected.
 2. Match the request to one operation below. Perform only that operation. Complete when every idea named by the user is accounted for.
-3. Preserve unrelated entries and unresolved wording. Run the repository's Markdown check after edits. Complete when the check passes or its exact blocker is reported.
+3. Preserve unrelated entries and unresolved wording. Run `just check-md` after edits. Complete when the check passes or its exact blocker is reported.
 4. Report ideas added, reprioritized, removed, or listed. For removals, include whether each idea became a feature or was rejected.
 
 ## Add ideas

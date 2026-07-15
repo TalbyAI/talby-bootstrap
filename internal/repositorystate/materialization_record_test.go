@@ -61,6 +61,20 @@ func TestUpsertManagedArtifactInsertsReplacesAndSorts(t *testing.T) {
 	}
 }
 
+func TestUpsertManagedArtifactDoesNotMutateInputs(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+	existing := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "z", Digest: digest}, {Path: "a", Digest: digest}}}
+	next := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "b", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "z", Digest: digest}, {Path: "a", Digest: digest}}}
+	record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{existing}}
+
+	_ = UpsertManagedArtifact(record, next)
+
+	if record.Artifacts[0].Files[0].Path != "z" || next.Files[0].Path != "z" {
+		t.Fatalf("UpsertManagedArtifact mutated its inputs: record=%#v next=%#v", record, next)
+	}
+}
+
 func TestValidateMaterializationRecordRejectsOwnerFilesPathsAndDigests(t *testing.T) {
 	digest := strings.Repeat("a", 64)
 	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}

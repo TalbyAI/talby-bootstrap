@@ -57,7 +57,12 @@ func (record MaterializationRecord) Artifact(key ArtifactKey) (ManagedArtifactRe
 	return ManagedArtifactRecord{}, false
 }
 func UpsertManagedArtifact(record MaterializationRecord, next ManagedArtifactRecord) MaterializationRecord {
-	values := append([]ManagedArtifactRecord(nil), record.Artifacts...)
+	values := make([]ManagedArtifactRecord, len(record.Artifacts))
+	copy(values, record.Artifacts)
+	for i := range values {
+		values[i].Files = append([]ManagedFileRecord(nil), values[i].Files...)
+	}
+	next.Files = append([]ManagedFileRecord(nil), next.Files...)
 	key := ManagedArtifactKey(next)
 	for i, a := range values {
 		if ManagedArtifactKey(a) == key {

@@ -52,7 +52,7 @@ Pull requests should include a brief summary, the reason for the change, and val
 
 ## Security & Configuration Tips
 
-Do not commit local secrets, keys, `.env` files, or generated local state. `.gitignore` already excludes `.local-*` and `.tmp-*`; keep machine-specific files in those patterns.
+Do not commit local secrets, keys, `.env` files, or generated local state. `.gitignore` excludes `.local-*`, `.tmp-*`, `tmp/`, and `.superpowers/`. The `tmp/` and `.superpowers/` directories are used by repository tooling; keep their generated contents untracked.
 
 ## Agent-Specific Instructions
 

@@ -139,6 +139,62 @@ func TestWriteReplacesThroughTemporaryFileInTargetDirectory(t *testing.T) {
 	}
 }
 
+func TestWriteRootedStaysWithOpenedOperationRoot(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = opened.Close() }()
+	moved := root + "-moved"
+	if err := os.Rename(root, moved); err != nil {
+		t.Skipf("rename opened root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeRooted(opened, observed, []byte("content")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(moved, "target")); err != nil || string(got) != "content" {
+		t.Fatalf("opened-root target = %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "target")); !os.IsNotExist(err) {
+		t.Fatalf("replacement-root target error = %v, want not exist", err)
+	}
+}
+
+func TestWriteRejectsReplacedOperationRoot(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := root + "-moved"
+	if err := os.Rename(root, moved); err != nil {
+		t.Skipf("rename operation root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Write(observed, []byte("content"))
+	var changed ChangedSincePreflightError
+	if !errors.As(err, &changed) {
+		t.Fatalf("Write() error = %T %v, want ChangedSincePreflightError", err, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "target")); !os.IsNotExist(err) {
+		t.Fatalf("replacement-root target error = %v, want not exist", err)
+	}
+}
+
 func TestObserveRejectsTargetsOutsideRootAndInvalidRoot(t *testing.T) {
 	root := t.TempDir()
 	for _, target := range []string{".", "..", "../outside", filepath.Join(root, "absolute")} {
