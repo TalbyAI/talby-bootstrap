@@ -159,14 +159,15 @@ func TestValidateSourceDescriptorRejectsInvalidFieldsAndDuplicates(t *testing.T)
 		t.Fatal("expected source name rejection")
 	}
 	incomplete := valid
+	incomplete.Artifacts = append([]artifactRef(nil), valid.Artifacts...)
 	incomplete.Artifacts[0].Path = ""
 	if validateSourceDescriptor(incomplete) == nil {
 		t.Fatal("expected incomplete artifact rejection")
 	}
 	duplicate := valid
 	duplicate.Artifacts = append(duplicate.Artifacts, artifactRef{Name: "a", Path: "other"})
-	if validateSourceDescriptor(duplicate) == nil {
-		t.Fatal("expected duplicate artifact rejection")
+	if err := validateSourceDescriptor(duplicate); err == nil || err.Error() != `duplicate artifact name "a"` {
+		t.Fatalf("validateSourceDescriptor() error = %v, want duplicate artifact rejection", err)
 	}
 }
 
