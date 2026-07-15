@@ -2,23 +2,35 @@
   "code": 0,
   "message": "install succeeded",
   "details": {
-    "artifact": {
-      "name": "base-readme",
-      "version": "1.0.0",
-      "path": "artifacts/base-readme"
-    },
-    "change": "installed",
-    "files": [
+    "operation": "install",
+    "outcome": "applied",
+    "artifact_count": 1,
+    "changes": [
       {
-        "path": "README.md",
-        "action": "created",
-        "digest": "0bb22161401947249a5f6f7c1604f46b77c6ed5b10094fcb75f2b58e6a7dd6be"
+        "kind": "resolution_locked",
+        "source": {
+          "type": "file",
+          "locator": ".tbboot-example/sources/local-example-source"
+        },
+        "artifact": "base-readme"
+      },
+      {
+        "kind": "declaration_added",
+        "source": {
+          "type": "file",
+          "locator": ".tbboot-example/sources/local-example-source"
+        },
+        "artifact": "base-readme"
+      },
+      {
+        "kind": "file_created",
+        "source": {
+          "type": "file",
+          "locator": ".tbboot-example/sources/local-example-source"
+        },
+        "artifact": "base-readme",
+        "path": "README.md"
       }
-    ],
-    "source": {
-      "type": "file",
-      "name": "local-example-source",
-      "version": "local-snapshot-e530234a73a5f3a97305bb38e0d405d8cfa484f7b0ca60972b1e736bd0b4e7f8"
-    }
+    ]
   }
 }

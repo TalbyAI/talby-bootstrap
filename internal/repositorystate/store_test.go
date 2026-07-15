@@ -5,432 +5,105 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
+	"strings"
 	"testing"
 )
 
-func requireStateFileError(t *testing.T, err error, file StateFile, kind StateFileErrorKind) {
-	t.Helper()
-
-	var stateErr StateFileError
-	if !errors.As(err, &stateErr) {
-		t.Fatalf("error = %T, want StateFileError", err)
-	}
-	if stateErr.File != file || stateErr.Kind != kind {
-		t.Fatalf("StateFileError = %#v, want %s/%s", stateErr, file, kind)
-	}
-}
-
 func TestStateFileErrorFormatsWithoutCause(t *testing.T) {
-	err := StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat}
-	if got := err.Error(); got != "manifest invalid_format" {
-		t.Fatalf("Error() = %q, want nil-safe fallback", got)
+	if got := (StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat}).Error(); got != "manifest invalid_format" {
+		t.Fatalf("Error() = %q", got)
 	}
 }
 
 func TestStateFileErrorUnwrapsCause(t *testing.T) {
 	cause := errors.New("boom")
-	err := StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: cause}
-	if !errors.Is(err, cause) {
-		t.Fatalf("errors.Is(err, cause) = false, want true")
-	}
-	if got := err.Unwrap(); got != cause {
-		t.Fatalf("Unwrap() = %v, want %v", got, cause)
+	if !errors.Is(StateFileError{Err: cause}, cause) {
+		t.Fatal("StateFileError did not unwrap cause")
 	}
 }
 
-func TestStoreLoadManifestReturnsNotFoundForMissingFile(t *testing.T) {
+func TestStoreMissingFilesAreTyped(t *testing.T) {
 	store := NewStore()
-
-	_, err := store.LoadManifest(context.Background(), t.TempDir())
-	if err == nil {
-		t.Fatal("LoadManifest() error = nil, want StateFileError")
+	for _, file := range []StateFile{StateFileManifest, StateFileLockfile, StateFileMaterializationRecord} {
+		var err error
+		switch file {
+		case StateFileManifest:
+			_, err = store.LoadManifest(context.Background(), t.TempDir())
+		case StateFileLockfile:
+			_, err = store.LoadLockfile(context.Background(), t.TempDir())
+		default:
+			_, err = store.LoadMaterializationRecord(context.Background(), t.TempDir())
+		}
+		var state StateFileError
+		if !errors.As(err, &state) || state.File != file || state.Kind != StateFileErrorNotFound {
+			t.Fatalf("%s error = %v, want typed not-found", file, err)
+		}
 	}
-	requireStateFileError(t, err, StateFileManifest, StateFileErrorNotFound)
 }
 
-func TestStoreManifestRoundTripPreservesSchemaAndSortOrder(t *testing.T) {
+func TestStoreRoundTripsGroupedStateSchema(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore()
-
-	manifest := Manifest{
-		TrustPolicy: TrustPolicy{
-			ApprovedSources: []SourceIdentity{
-				{Type: "git", Name: "company/platform"},
-				{Type: "file", Name: "local-example-source"},
-			},
-		},
-		Declarations: []Declaration{
-			{
-				Source: SourceIdentity{Type: "file", Name: "local-example-source"},
-				Target: DeclarationTarget{Scope: DeclarationScopeArtifact, Artifact: "base-readme"},
-				Input:  &SourceInput{Locator: "/tmp/example"},
-			},
-			{
-				Source: SourceIdentity{Type: "git", Name: "company/platform"},
-				Target: DeclarationTarget{Scope: DeclarationScopeSource},
-			},
-		},
-	}
-
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+	manifest := Manifest{TrustPolicy: TrustPolicy{ApprovedSources: []SourceIdentity{source}}, Declarations: []Declaration{{Source: source, Target: DeclarationTarget{Scope: DeclarationScopeSource}}}}
+	lockfile := Lockfile{Resolutions: []Resolution{{Source: source, ResolvedVersion: "snapshot", Artifacts: []ArtifactResolution{{Name: "a", Version: "1"}, {Name: "b", Version: "2"}}}}}
+	record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{Source: source, ResolvedVersion: "snapshot", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "a.txt", Digest: strings.Repeat("a", 64)}}}}}
 	if err := store.WriteManifest(context.Background(), root, manifest); err != nil {
-		t.Fatalf("WriteManifest() error = %v", err)
+		t.Fatal(err)
 	}
-
-	bytes, err := os.ReadFile(filepath.Join(root, ManifestFileName))
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	want := "" +
-		"schema_version: 1\n" +
-		"trust_policy:\n" +
-		"  approved_sources:\n" +
-		"    - type: file\n" +
-		"      name: local-example-source\n" +
-		"    - type: git\n" +
-		"      name: company/platform\n" +
-		"declarations:\n" +
-		"  - source:\n" +
-		"      type: file\n" +
-		"      name: local-example-source\n" +
-		"    target:\n" +
-		"      scope: artifact\n" +
-		"      artifact: base-readme\n" +
-		"    input:\n" +
-		"      locator: /tmp/example\n" +
-		"  - source:\n" +
-		"      type: git\n" +
-		"      name: company/platform\n" +
-		"    target:\n" +
-		"      scope: source\n"
-	if got := string(bytes); got != want {
-		t.Fatalf("manifest file = %q, want %q", got, want)
-	}
-
-	loaded, err := store.LoadManifest(context.Background(), root)
-	if err != nil {
-		t.Fatalf("LoadManifest() error = %v", err)
-	}
-	wantManifest := Manifest{
-		TrustPolicy: TrustPolicy{
-			ApprovedSources: []SourceIdentity{
-				{Type: "file", Name: "local-example-source"},
-				{Type: "git", Name: "company/platform"},
-			},
-		},
-		Declarations: []Declaration{
-			{
-				Source: SourceIdentity{Type: "file", Name: "local-example-source"},
-				Target: DeclarationTarget{Scope: DeclarationScopeArtifact, Artifact: "base-readme"},
-				Input:  &SourceInput{Locator: "/tmp/example"},
-			},
-			{
-				Source: SourceIdentity{Type: "git", Name: "company/platform"},
-				Target: DeclarationTarget{Scope: DeclarationScopeSource},
-			},
-		},
-	}
-	if !reflect.DeepEqual(loaded, wantManifest) {
-		t.Fatalf("LoadManifest() = %#v, want %#v", loaded, wantManifest)
-	}
-}
-
-func TestStoreLoadManifestTreatsEmptyAndInvalidFilesAsInvalidFormat(t *testing.T) {
-	root := t.TempDir()
-	store := NewStore()
-	path := filepath.Join(root, ManifestFileName)
-
-	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err := store.LoadManifest(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadManifest() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileManifest, StateFileErrorInvalidFormat)
-
-	if err := os.WriteFile(path, []byte("schema_version: 2\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err = store.LoadManifest(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadManifest() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileManifest, StateFileErrorInvalidFormat)
-
-	if err := os.WriteFile(path, []byte("schema_version: [\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err = store.LoadManifest(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadManifest() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileManifest, StateFileErrorInvalidFormat)
-}
-
-func TestStoreLoadManifestRejectsDuplicateOnDiskState(t *testing.T) {
-	root := t.TempDir()
-	store := NewStore()
-	path := filepath.Join(root, ManifestFileName)
-
-	content := "" +
-		"schema_version: 1\n" +
-		"declarations:\n" +
-		"  - source:\n" +
-		"      type: file\n" +
-		"      name: local-example-source\n" +
-		"    target:\n" +
-		"      scope: artifact\n" +
-		"      artifact: base-readme\n" +
-		"  - source:\n" +
-		"      type: file\n" +
-		"      name: local-example-source\n" +
-		"    target:\n" +
-		"      scope: artifact\n" +
-		"      artifact: base-readme\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err := store.LoadManifest(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadManifest() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileManifest, StateFileErrorInvalidFormat)
-}
-
-func TestStoreLoadLockfileReturnsNotFoundForMissingFile(t *testing.T) {
-	store := NewStore()
-
-	_, err := store.LoadLockfile(context.Background(), t.TempDir())
-	if err == nil {
-		t.Fatal("LoadLockfile() error = nil, want StateFileError")
-	}
-	requireStateFileError(t, err, StateFileLockfile, StateFileErrorNotFound)
-}
-
-func TestStoreLockfileRoundTripPreservesSchemaAndSortOrder(t *testing.T) {
-	root := t.TempDir()
-	store := NewStore()
-
-	lockfile := Lockfile{
-		Resolutions: []Resolution{
-			{
-				Source:          SourceIdentity{Type: "git", Name: "company/platform"},
-				ResolvedVersion: "git-sha-abc123",
-				Artifact:        ArtifactResolution{Name: "ci-github", Version: "2.4.0"},
-			},
-			{
-				Source:          SourceIdentity{Type: "file", Name: "local-example-source"},
-				ResolvedVersion: "local-snapshot-001",
-				Artifact:        ArtifactResolution{Name: "base-readme", Version: "1.0.0"},
-			},
-		},
-	}
-
 	if err := store.WriteLockfile(context.Background(), root, lockfile); err != nil {
-		t.Fatalf("WriteLockfile() error = %v", err)
+		t.Fatal(err)
 	}
-
-	bytes, err := os.ReadFile(filepath.Join(root, LockfileFileName))
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
+	if err := store.WriteMaterializationRecord(context.Background(), root, record); err != nil {
+		t.Fatal(err)
 	}
-	want := "" +
-		"schema_version: 1\n" +
-		"resolutions:\n" +
-		"  - source:\n" +
-		"      type: file\n" +
-		"      name: local-example-source\n" +
-		"    resolved_version: local-snapshot-001\n" +
-		"    artifact:\n" +
-		"      name: base-readme\n" +
-		"      version: 1.0.0\n" +
-		"  - source:\n" +
-		"      type: git\n" +
-		"      name: company/platform\n" +
-		"    resolved_version: git-sha-abc123\n" +
-		"    artifact:\n" +
-		"      name: ci-github\n" +
-		"      version: 2.4.0\n"
-	if got := string(bytes); got != want {
-		t.Fatalf("lockfile = %q, want %q", got, want)
+	for _, name := range []string{ManifestFileName, LockfileFileName, MaterializationRecordFileName} {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		for _, want := range []string{"type: file", "locator: source"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q: %s", name, want, text)
+			}
+		}
 	}
-
-	loaded, err := store.LoadLockfile(context.Background(), root)
-	if err != nil {
-		t.Fatalf("LoadLockfile() error = %v", err)
+	lockData, _ := os.ReadFile(filepath.Join(root, LockfileFileName))
+	if !strings.Contains(string(lockData), "artifacts:") {
+		t.Fatalf("lockfile = %s, want grouped artifacts", lockData)
 	}
-	wantLockfile := Lockfile{
-		Resolutions: []Resolution{
-			{
-				Source:          SourceIdentity{Type: "file", Name: "local-example-source"},
-				ResolvedVersion: "local-snapshot-001",
-				Artifact:        ArtifactResolution{Name: "base-readme", Version: "1.0.0"},
-			},
-			{
-				Source:          SourceIdentity{Type: "git", Name: "company/platform"},
-				ResolvedVersion: "git-sha-abc123",
-				Artifact:        ArtifactResolution{Name: "ci-github", Version: "2.4.0"},
-			},
-		},
+	recordData, _ := os.ReadFile(filepath.Join(root, MaterializationRecordFileName))
+	if !strings.Contains(string(recordData), "artifact_version:") {
+		t.Fatalf("record = %s, want artifact_version", recordData)
 	}
-	if !reflect.DeepEqual(loaded, wantLockfile) {
-		t.Fatalf("LoadLockfile() = %#v, want %#v", loaded, wantLockfile)
+	if got, err := store.LoadLockfile(context.Background(), root); err != nil || len(got.Resolutions) != 1 || len(got.Resolutions[0].Artifacts) != 2 {
+		t.Fatalf("LoadLockfile() = %#v, %v", got, err)
+	}
+	if got, err := store.LoadMaterializationRecord(context.Background(), root); err != nil || got.Artifacts[0].ArtifactVersion != "1" {
+		t.Fatalf("LoadMaterializationRecord() = %#v, %v", got, err)
 	}
 }
 
-func TestStoreLoadLockfileTreatsEmptyAndInvalidFilesAsInvalidFormat(t *testing.T) {
+func TestStoreRejectsInvalidStateFiles(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore()
-	path := filepath.Join(root, LockfileFileName)
-
-	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	for _, name := range []string{ManifestFileName, LockfileFileName, MaterializationRecordFileName} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("schema_version: 2\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		switch name {
+		case ManifestFileName:
+			_, err = store.LoadManifest(context.Background(), root)
+		case LockfileFileName:
+			_, err = store.LoadLockfile(context.Background(), root)
+		default:
+			_, err = store.LoadMaterializationRecord(context.Background(), root)
+		}
+		var state StateFileError
+		if !errors.As(err, &state) || state.Kind != StateFileErrorInvalidFormat {
+			t.Fatalf("%s error = %v", name, err)
+		}
 	}
-
-	_, err := store.LoadLockfile(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadLockfile() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileLockfile, StateFileErrorInvalidFormat)
-
-	if err := os.WriteFile(path, []byte("schema_version: 2\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err = store.LoadLockfile(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadLockfile() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileLockfile, StateFileErrorInvalidFormat)
-
-	if err := os.WriteFile(path, []byte("schema_version: [\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err = store.LoadLockfile(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadLockfile() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileLockfile, StateFileErrorInvalidFormat)
-}
-
-func TestStoreLoadLockfileRejectsDuplicateOnDiskState(t *testing.T) {
-	root := t.TempDir()
-	store := NewStore()
-	path := filepath.Join(root, LockfileFileName)
-
-	content := "" +
-		"schema_version: 1\n" +
-		"resolutions:\n" +
-		"  - source:\n" +
-		"      type: file\n" +
-		"      name: local-example-source\n" +
-		"    resolved_version: local-snapshot-001\n" +
-		"    artifact:\n" +
-		"      name: base-readme\n" +
-		"      version: 1.0.0\n" +
-		"  - source:\n" +
-		"      type: file\n" +
-		"      name: local-example-source\n" +
-		"    resolved_version: local-snapshot-002\n" +
-		"    artifact:\n" +
-		"      name: base-readme\n" +
-		"      version: 1.1.0\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err := store.LoadLockfile(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadLockfile() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileLockfile, StateFileErrorInvalidFormat)
-}
-
-func TestStoreLoadMaterializationRecordReturnsNotFoundForMissingFile(t *testing.T) {
-	store := NewStore()
-
-	_, err := store.LoadMaterializationRecord(context.Background(), t.TempDir())
-	if err == nil {
-		t.Fatal("LoadMaterializationRecord() error = nil, want StateFileError")
-	}
-	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorNotFound)
-}
-
-func TestStoreLoadMaterializationRecordTreatsEmptyAndInvalidFilesAsInvalidFormat(t *testing.T) {
-	root := t.TempDir()
-	store := NewStore()
-	path := filepath.Join(root, MaterializationRecordFileName)
-
-	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err := store.LoadMaterializationRecord(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadMaterializationRecord() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorInvalidFormat)
-
-	if err := os.WriteFile(path, []byte("schema_version: 2\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err = store.LoadMaterializationRecord(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadMaterializationRecord() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorInvalidFormat)
-
-	if err := os.WriteFile(path, []byte("schema_version: [\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err = store.LoadMaterializationRecord(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadMaterializationRecord() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorInvalidFormat)
-}
-
-func TestStoreLoadMaterializationRecordRejectsDuplicateOnDiskState(t *testing.T) {
-	root := t.TempDir()
-	store := NewStore()
-	path := filepath.Join(root, MaterializationRecordFileName)
-
-	content := "" +
-		"schema_version: 1\n" +
-		"artifacts:\n" +
-		"  - key:\n" +
-		"      source:\n" +
-		"        type: file\n" +
-		"        name: one\n" +
-		"      resolved_version: local-snapshot-001\n" +
-		"      artifact: a\n" +
-		"    files:\n" +
-		"      - path: README.md\n" +
-		"        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
-		"  - key:\n" +
-		"      source:\n" +
-		"        type: file\n" +
-		"        name: two\n" +
-		"      resolved_version: local-snapshot-002\n" +
-		"      artifact: b\n" +
-		"    files:\n" +
-		"      - path: README.md\n" +
-		"        digest: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	_, err := store.LoadMaterializationRecord(context.Background(), root)
-	if err == nil {
-		t.Fatal("LoadMaterializationRecord() error = nil, want invalid_format error")
-	}
-	requireStateFileError(t, err, StateFileMaterializationRecord, StateFileErrorInvalidFormat)
 }

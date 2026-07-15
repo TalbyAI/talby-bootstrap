@@ -59,7 +59,6 @@ type manifestTargetDTO struct {
 
 type manifestInputDTO struct {
 	Locator string `yaml:"locator,omitempty"`
-	Version string `yaml:"version,omitempty"`
 }
 
 type lockfileDocument struct {
@@ -68,9 +67,9 @@ type lockfileDocument struct {
 }
 
 type lockfileResolutionDTO struct {
-	Source          SourceIdentity      `yaml:"source"`
-	ResolvedVersion string              `yaml:"resolved_version"`
-	Artifact        lockfileArtifactDTO `yaml:"artifact"`
+	Source          SourceIdentity        `yaml:"source"`
+	ResolvedVersion string                `yaml:"resolved_version"`
+	Artifacts       []lockfileArtifactDTO `yaml:"artifacts"`
 }
 
 type lockfileArtifactDTO struct {
@@ -84,14 +83,11 @@ type materializationRecordDocument struct {
 }
 
 type materializationArtifactRecordDTO struct {
-	Key   materializationArtifactKeyDTO   `yaml:"key"`
-	Files []materializationManagedFileDTO `yaml:"files,omitempty"`
-}
-
-type materializationArtifactKeyDTO struct {
-	Source          SourceIdentity `yaml:"source"`
-	ResolvedVersion string         `yaml:"resolved_version"`
-	Artifact        string         `yaml:"artifact"`
+	Source          SourceIdentity                  `yaml:"source"`
+	ResolvedVersion string                          `yaml:"resolved_version"`
+	Artifact        string                          `yaml:"artifact"`
+	ArtifactVersion string                          `yaml:"artifact_version"`
+	Files           []materializationManagedFileDTO `yaml:"files,omitempty"`
 }
 
 type materializationManagedFileDTO struct {
@@ -134,7 +130,7 @@ func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) 
 			Input:  sourceInputFromDTO(dto.Input),
 		})
 	}
-	if err := ValidateManifest(manifest); err != nil {
+	if err := ValidateManifest(root, manifest); err != nil {
 		return Manifest{}, StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: err}
 	}
 
@@ -142,7 +138,7 @@ func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) 
 }
 
 func (fileStore) WriteManifest(_ context.Context, root string, manifest Manifest) error {
-	if err := ValidateManifest(manifest); err != nil {
+	if err := ValidateManifest(root, manifest); err != nil {
 		return err
 	}
 
@@ -159,12 +155,12 @@ func (fileStore) WriteManifest(_ context.Context, root string, manifest Manifest
 		if left.Type != right.Type {
 			return left.Type < right.Type
 		}
-		return left.Name < right.Name
+		return left.Locator < right.Locator
 	})
 
 	declarations := append([]Declaration(nil), manifest.Declarations...)
 	sort.Slice(declarations, func(i, j int) bool {
-		return declarationKey(declarations[i]) < declarationKey(declarations[j])
+		return DeclarationKey(declarations[i]) < DeclarationKey(declarations[j])
 	})
 	for _, decl := range declarations {
 		doc.Declarations = append(doc.Declarations, manifestDeclarationDTO{
@@ -209,14 +205,11 @@ func (fileStore) LoadLockfile(_ context.Context, root string) (Lockfile, error) 
 		Resolutions: make([]Resolution, 0, len(doc.Resolutions)),
 	}
 	for _, dto := range doc.Resolutions {
-		lockfile.Resolutions = append(lockfile.Resolutions, Resolution{
-			Source:          dto.Source,
-			ResolvedVersion: dto.ResolvedVersion,
-			Artifact: ArtifactResolution{
-				Name:    dto.Artifact.Name,
-				Version: dto.Artifact.Version,
-			},
-		})
+		artifacts := make([]ArtifactResolution, 0, len(dto.Artifacts))
+		for _, artifact := range dto.Artifacts {
+			artifacts = append(artifacts, ArtifactResolution{Name: artifact.Name, Version: artifact.Version})
+		}
+		lockfile.Resolutions = append(lockfile.Resolutions, Resolution{Source: dto.Source, ResolvedVersion: dto.ResolvedVersion, Artifacts: artifacts})
 	}
 	if err := ValidateLockfile(lockfile); err != nil {
 		return Lockfile{}, StateFileError{File: StateFileLockfile, Kind: StateFileErrorInvalidFormat, Err: err}
@@ -237,17 +230,14 @@ func (fileStore) WriteLockfile(_ context.Context, root string, lockfile Lockfile
 
 	resolutions := append([]Resolution(nil), lockfile.Resolutions...)
 	sort.Slice(resolutions, func(i, j int) bool {
-		return resolutionKey(resolutions[i]) < resolutionKey(resolutions[j])
+		return SourceIdentityKey(resolutions[i].Source)+"\x00"+resolutions[i].ResolvedVersion < SourceIdentityKey(resolutions[j].Source)+"\x00"+resolutions[j].ResolvedVersion
 	})
 	for _, res := range resolutions {
-		doc.Resolutions = append(doc.Resolutions, lockfileResolutionDTO{
-			Source:          res.Source,
-			ResolvedVersion: res.ResolvedVersion,
-			Artifact: lockfileArtifactDTO{
-				Name:    res.Artifact.Name,
-				Version: res.Artifact.Version,
-			},
-		})
+		artifacts := make([]lockfileArtifactDTO, 0, len(res.Artifacts))
+		for _, artifact := range res.Artifacts {
+			artifacts = append(artifacts, lockfileArtifactDTO{Name: artifact.Name, Version: artifact.Version})
+		}
+		doc.Resolutions = append(doc.Resolutions, lockfileResolutionDTO{Source: res.Source, ResolvedVersion: res.ResolvedVersion, Artifacts: artifacts})
 	}
 
 	bytes, err := encodeYAML(doc)
@@ -290,14 +280,7 @@ func (fileStore) LoadMaterializationRecord(_ context.Context, root string) (Mate
 				Digest: file.Digest,
 			})
 		}
-		record.Artifacts = append(record.Artifacts, ManagedArtifactRecord{
-			Key: ManagedArtifactKey{
-				Source:          dto.Key.Source,
-				ResolvedVersion: dto.Key.ResolvedVersion,
-				Artifact:        dto.Key.Artifact,
-			},
-			Files: files,
-		})
+		record.Artifacts = append(record.Artifacts, ManagedArtifactRecord{Source: dto.Source, ResolvedVersion: dto.ResolvedVersion, Artifact: dto.Artifact, ArtifactVersion: dto.ArtifactVersion, Files: files})
 	}
 	if err := ValidateMaterializationRecord(record); err != nil {
 		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: err}
@@ -317,7 +300,7 @@ func (fileStore) WriteMaterializationRecord(_ context.Context, root string, reco
 	}
 	artifacts := append([]ManagedArtifactRecord(nil), record.Artifacts...)
 	sort.Slice(artifacts, func(i, j int) bool {
-		return managedArtifactKeyString(artifacts[i].Key) < managedArtifactKeyString(artifacts[j].Key)
+		return SourceIdentityKey(artifacts[i].Source)+"\x00"+artifacts[i].Artifact < SourceIdentityKey(artifacts[j].Source)+"\x00"+artifacts[j].Artifact
 	})
 	for _, artifact := range artifacts {
 		files := append([]ManagedFileRecord(nil), artifact.Files...)
@@ -331,14 +314,7 @@ func (fileStore) WriteMaterializationRecord(_ context.Context, root string, reco
 				Digest: file.Digest,
 			})
 		}
-		doc.Artifacts = append(doc.Artifacts, materializationArtifactRecordDTO{
-			Key: materializationArtifactKeyDTO{
-				Source:          artifact.Key.Source,
-				ResolvedVersion: artifact.Key.ResolvedVersion,
-				Artifact:        artifact.Key.Artifact,
-			},
-			Files: fileDTOs,
-		})
+		doc.Artifacts = append(doc.Artifacts, materializationArtifactRecordDTO{Source: artifact.Source, ResolvedVersion: artifact.ResolvedVersion, Artifact: artifact.Artifact, ArtifactVersion: artifact.ArtifactVersion, Files: fileDTOs})
 	}
 
 	bytes, err := encodeYAML(doc)
@@ -403,12 +379,12 @@ func sourceInputFromDTO(input *manifestInputDTO) *SourceInput {
 	if input == nil {
 		return nil
 	}
-	return &SourceInput{Locator: input.Locator, Version: input.Version}
+	return &SourceInput{Locator: input.Locator}
 }
 
 func manifestInputFromDomain(input *SourceInput) *manifestInputDTO {
 	if input == nil {
 		return nil
 	}
-	return &manifestInputDTO{Locator: input.Locator, Version: input.Version}
+	return &manifestInputDTO{Locator: input.Locator}
 }
