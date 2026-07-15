@@ -44,3 +44,65 @@ func TestValidateManifestRejectsMismatchedPreservedLocator(t *testing.T) {
 		t.Fatal("expected mismatch")
 	}
 }
+
+func TestNormalizeSourceIdentityRejectsIncompleteAndUnsupportedSources(t *testing.T) {
+	root := t.TempDir()
+	if _, err := NormalizeSourceIdentity(root, SourceIdentity{}); err == nil {
+		t.Fatal("expected incomplete source rejection")
+	}
+	if _, err := NormalizeSourceIdentity(root, SourceIdentity{Type: "git", Locator: "x"}); err == nil {
+		t.Fatal("expected unsupported source rejection")
+	}
+}
+
+func TestAcquisitionLocatorRequiresNormalizedSource(t *testing.T) {
+	root := t.TempDir()
+	if _, err := AcquisitionLocator(root, SourceIdentity{Type: SourceTypeFile, Locator: "./source"}); err == nil {
+		t.Fatal("expected unnormalized locator rejection")
+	}
+	got, err := AcquisitionLocator(root, SourceIdentity{Type: SourceTypeFile, Locator: "source"})
+	if err != nil || got != filepath.Join(root, "source") {
+		t.Fatalf("AcquisitionLocator() = %q, %v", got, err)
+	}
+}
+
+func TestManifestAddDeclarationKindsAndConflicts(t *testing.T) {
+	root := t.TempDir()
+	declaration := Declaration{Source: SourceIdentity{Type: SourceTypeFile, Locator: "source"}, Target: DeclarationTarget{Scope: DeclarationScopeArtifact, Artifact: "a"}}
+	manifest, kind, err := (Manifest{}).AddDeclaration(root, declaration)
+	if err != nil || kind != ChangeKindInserted || len(manifest.Declarations) != 1 {
+		t.Fatalf("insert = %#v, %q, %v", manifest, kind, err)
+	}
+	_, kind, err = manifest.AddDeclaration(root, declaration)
+	if err != nil || kind != ChangeKindUnchanged {
+		t.Fatalf("same kind = %q, error = %v", kind, err)
+	}
+	declaration.Input = &SourceInput{Locator: "source"}
+	if _, _, err := manifest.AddDeclaration(root, declaration); err == nil {
+		t.Fatal("expected conflicting declaration")
+	}
+	if _, _, err := manifest.AddDeclaration(root, Declaration{Source: SourceIdentity{Type: "git", Locator: "source"}}); err == nil {
+		t.Fatal("expected invalid source")
+	}
+}
+
+func TestValidateManifestTargetsTrustAndDuplicates(t *testing.T) {
+	root := t.TempDir()
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+	if err := ValidateManifest(root, Manifest{TrustPolicy: TrustPolicy{ApprovedSources: []SourceIdentity{{Type: SourceTypeFile, Locator: "./source"}}}}); err == nil {
+		t.Fatal("expected unnormalized approved source")
+	}
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: source}}}); err == nil {
+		t.Fatal("expected missing scope")
+	}
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: source, Target: DeclarationTarget{Scope: DeclarationScopeArtifact}}}}); err == nil {
+		t.Fatal("expected missing artifact")
+	}
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{{Source: source, Target: DeclarationTarget{Scope: DeclarationScopeSource, Artifact: "a"}}}}); err == nil {
+		t.Fatal("expected source artifact rejection")
+	}
+	declaration := Declaration{Source: source, Target: DeclarationTarget{Scope: DeclarationScopeSource}}
+	if err := ValidateManifest(root, Manifest{Declarations: []Declaration{declaration, declaration}}); err == nil {
+		t.Fatal("expected duplicate declaration")
+	}
+}

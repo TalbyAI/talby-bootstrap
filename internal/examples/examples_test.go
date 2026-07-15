@@ -451,6 +451,100 @@ func TestRequireFileAndDirRejectWrongTypes(t *testing.T) {
 	}
 }
 
+func TestValidateVerificationRejectsEachInvalidMode(t *testing.T) {
+	valid := Verification{ExitCode: "exact", StdoutText: "absent", StdoutJSON: "absent", StderrText: "absent", StderrJSON: "absent", ConsumerState: "absent"}
+	invalid := valid
+	invalid.ExitCode = "bad"
+	if validateVerification("example", invalid) == nil {
+		t.Fatal("expected exit code rejection")
+	}
+	invalid = valid
+	invalid.StdoutJSON = "bad"
+	if validateVerification("example", invalid) == nil {
+		t.Fatal("expected stdout JSON rejection")
+	}
+	invalid = valid
+	invalid.StderrText = "bad"
+	if validateVerification("example", invalid) == nil {
+		t.Fatal("expected stderr text rejection")
+	}
+	invalid = valid
+	invalid.StderrJSON = "bad"
+	if validateVerification("example", invalid) == nil {
+		t.Fatal("expected stderr JSON rejection")
+	}
+	invalid = valid
+	invalid.ConsumerState = "bad"
+	if validateVerification("example", invalid) == nil {
+		t.Fatal("expected consumer state rejection")
+	}
+}
+
+func TestValidateMetadataRejectsCoreInvalidFields(t *testing.T) {
+	root := t.TempDir()
+	mkdirAll(t, filepath.Join(root, "expected"))
+	writeFile(t, filepath.Join(root, "expected", "exit-code.txt"), "0\n")
+	valid := Metadata{
+		SchemaVersion: 1,
+		ID:            filepath.Base(root),
+		Kind:          "atomic-case",
+		Status:        "active",
+		Polarity:      "positive",
+		Summary:       "summary",
+		Commands:      []Command{{Argv: []string{"tbboot"}}},
+		Verification:  Verification{ExitCode: "exact", StdoutText: "absent", StdoutJSON: "absent", StderrText: "absent", StderrJSON: "absent", ConsumerState: "absent"},
+	}
+	invalid := valid
+	invalid.SchemaVersion = 2
+	if validateMetadata(root, "atomic-cases", invalid) == nil {
+		t.Fatal("expected schema rejection")
+	}
+	invalid = valid
+	invalid.ID = ""
+	if validateMetadata(root, "atomic-cases", invalid) == nil {
+		t.Fatal("expected ID rejection")
+	}
+	invalid = valid
+	invalid.ID = "other"
+	if validateMetadata(root, "atomic-cases", invalid) == nil {
+		t.Fatal("expected directory mismatch rejection")
+	}
+	invalid = valid
+	invalid.Kind = "scenario"
+	if validateMetadata(root, "atomic-cases", invalid) == nil {
+		t.Fatal("expected kind rejection")
+	}
+	invalid = valid
+	invalid.Polarity = "neutral"
+	if validateMetadata(root, "atomic-cases", invalid) == nil {
+		t.Fatal("expected polarity rejection")
+	}
+	invalid = valid
+	invalid.Summary = ""
+	if validateMetadata(root, "atomic-cases", invalid) == nil {
+		t.Fatal("expected summary rejection")
+	}
+	invalid = valid
+	invalid.Commands = nil
+	if validateMetadata(root, "atomic-cases", invalid) == nil {
+		t.Fatal("expected command rejection")
+	}
+	invalid = valid
+	invalid.NormativeOutput = []string{"expected/missing.txt"}
+	if validateMetadata(root, "atomic-cases", invalid) == nil {
+		t.Fatal("expected missing normative output rejection")
+	}
+}
+
+func TestSingularKindAndNestedMapKeyFallbacks(t *testing.T) {
+	if singularKind("scenarios") != "scenario" || singularKind("other") != "other" {
+		t.Fatal("unexpected singular kind")
+	}
+	if hasNestedMapKey(nil, "source", "type") {
+		t.Fatal("nil node contains key")
+	}
+}
+
 func mkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {

@@ -28,6 +28,33 @@ func TestHelpIncludesV1CommandSurfaces(t *testing.T) {
 	}
 }
 
+func TestPlaceholderCommandsRenderHumanAndJSON(t *testing.T) {
+	for _, args := range [][]string{{"upgrade"}, {"catalog", "list"}} {
+		var stdout bytes.Buffer
+		if code := execute(context.Background(), args, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) || strings.TrimSpace(stdout.String()) != "not implemented" {
+			t.Fatalf("execute(%v) = %d, %q", args, code, stdout.String())
+		}
+	}
+	var stdout bytes.Buffer
+	if code := execute(context.Background(), []string{"--output", "json", "search"}, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+		t.Fatalf("JSON exit code = %d", code)
+	}
+	var result app.Result
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result.Message != "not implemented" {
+		t.Fatalf("JSON result = %#v, %v", result, err)
+	}
+}
+
+func TestUnsupportedOutputModeReportsHumanError(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := execute(context.Background(), []string{"--output", "xml", "search"}, &bytes.Buffer{}, &stderr); code != int(app.ExitOperationalOrValidationError) {
+		t.Fatalf("exit code = %d", code)
+	}
+	if !strings.Contains(stderr.String(), `unsupported output mode "xml"`) {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestSyncHumanNoOpAndAppliedOutput(t *testing.T) {
 	root := t.TempDir()
 	sourceRoot := filepath.Join(root, "source")

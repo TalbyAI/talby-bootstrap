@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -80,8 +81,28 @@ func TestStoreRoundTripsGroupedStateSchema(t *testing.T) {
 	if got, err := store.LoadLockfile(context.Background(), root); err != nil || len(got.Resolutions) != 1 || len(got.Resolutions[0].Artifacts) != 2 {
 		t.Fatalf("LoadLockfile() = %#v, %v", got, err)
 	}
+	if got, err := store.LoadManifest(context.Background(), root); err != nil || !reflect.DeepEqual(got, manifest) {
+		t.Fatalf("LoadManifest() = %#v, %v, want %#v", got, err, manifest)
+	}
 	if got, err := store.LoadMaterializationRecord(context.Background(), root); err != nil || got.Artifacts[0].ArtifactVersion != "1" {
 		t.Fatalf("LoadMaterializationRecord() = %#v, %v", got, err)
+	}
+}
+
+func TestStoreRoundTripsManifestInput(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore()
+	manifest := Manifest{Declarations: []Declaration{{
+		Source: SourceIdentity{Type: SourceTypeFile, Locator: "source"},
+		Target: DeclarationTarget{Scope: DeclarationScopeSource},
+		Input:  &SourceInput{Locator: "source"},
+	}}}
+	if err := store.WriteManifest(context.Background(), root, manifest); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.LoadManifest(context.Background(), root)
+	if err != nil || !reflect.DeepEqual(got, manifest) {
+		t.Fatalf("LoadManifest() = %#v, %v, want %#v", got, err, manifest)
 	}
 }
 
@@ -130,5 +151,56 @@ func TestLoadManifestRejectsInputVersion(t *testing.T) {
 	var state StateFileError
 	if !errors.As(err, &state) || state.File != StateFileManifest || state.Kind != StateFileErrorInvalidFormat {
 		t.Fatalf("LoadManifest() error = %T %v, want invalid-format Manifest", err, err)
+	}
+}
+
+func TestStoreRejectsEmptyAndMalformedStateFiles(t *testing.T) {
+	store := NewStore()
+	for _, contents := range []string{"", "schema_version: ["} {
+		root := t.TempDir()
+		for _, name := range []string{ManifestFileName, LockfileFileName, MaterializationRecordFileName} {
+			if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		loads := []func() error{
+			func() error { _, err := store.LoadManifest(context.Background(), root); return err },
+			func() error { _, err := store.LoadLockfile(context.Background(), root); return err },
+			func() error { _, err := store.LoadMaterializationRecord(context.Background(), root); return err },
+		}
+		for _, load := range loads {
+			var state StateFileError
+			if err := load(); !errors.As(err, &state) || state.Kind != StateFileErrorInvalidFormat {
+				t.Fatalf("load error = %T %v, want invalid format", err, err)
+			}
+		}
+	}
+}
+
+func TestStoreRejectsInvalidDomainValuesBeforeWriting(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore()
+	if err := store.WriteManifest(context.Background(), root, Manifest{Declarations: []Declaration{{}}}); err == nil {
+		t.Fatal("expected invalid manifest")
+	}
+	if err := store.WriteLockfile(context.Background(), root, Lockfile{Resolutions: []Resolution{{}}}); err == nil {
+		t.Fatal("expected invalid lockfile")
+	}
+	if err := store.WriteMaterializationRecord(context.Background(), root, MaterializationRecord{Artifacts: []ManagedArtifactRecord{{}}}); err == nil {
+		t.Fatal("expected invalid materialization record")
+	}
+}
+
+func TestStoreWriteReportsMissingRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	store := NewStore()
+	if err := store.WriteManifest(context.Background(), root, Manifest{}); err == nil {
+		t.Fatal("expected manifest write failure")
+	}
+	if err := store.WriteLockfile(context.Background(), root, Lockfile{}); err == nil {
+		t.Fatal("expected lockfile write failure")
+	}
+	if err := store.WriteMaterializationRecord(context.Background(), root, MaterializationRecord{}); err == nil {
+		t.Fatal("expected materialization record write failure")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -135,5 +136,69 @@ func TestWriteReplacesThroughTemporaryFileInTargetDirectory(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(root, "nested", ".file.*.tmp"))
 	if err != nil || len(matches) != 0 {
 		t.Fatalf("temporary files = %v, %v", matches, err)
+	}
+}
+
+func TestObserveRejectsTargetsOutsideRootAndInvalidRoot(t *testing.T) {
+	root := t.TempDir()
+	for _, target := range []string{".", "..", "../outside", filepath.Join(root, "absolute")} {
+		if _, err := Observe(root, target); err == nil {
+			t.Fatalf("Observe(%q) error = nil", target)
+		}
+	}
+	if _, err := Observe(filepath.Join(root, "missing"), "file"); err == nil {
+		t.Fatal("expected invalid root error")
+	}
+}
+
+func TestObserveRejectsRegularFileAsParent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "parent"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Observe(root, "parent/file"); err == nil || err.Error() != "target parent must be a real directory" {
+		t.Fatalf("Observe() error = %v", err)
+	}
+}
+
+func TestPathKeyDigestAndErrorText(t *testing.T) {
+	if got := PathKey("a/../b"); got != "b" {
+		t.Fatalf("PathKey() = %q", got)
+	}
+	if got := Digest([]byte("content")); len(got) != 64 || strings.Trim(got, "0123456789abcdef") != "" {
+		t.Fatalf("Digest() = %q", got)
+	}
+	if got := (ChangedSincePreflightError{Path: "a"}).Error(); got != `target "a" changed after preflight` {
+		t.Fatalf("Error() = %q", got)
+	}
+}
+
+func TestRevalidateAcceptsSameObservationAndRejectsChanges(t *testing.T) {
+	root := t.TempDir()
+	observed, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Revalidate(observed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var changed ChangedSincePreflightError
+	if err := Revalidate(observed); !errors.As(err, &changed) {
+		t.Fatalf("Revalidate() error = %T %v", err, err)
+	}
+}
+
+func TestSameObservationComparesAllStableFields(t *testing.T) {
+	base := Observation{Root: "root", Path: "path", AbsolutePath: "absolute", Kind: EntryRegular, Mode: 0o644, Digest: "digest"}
+	if !SameObservation(base, base) {
+		t.Fatal("identical observations differ")
+	}
+	changed := base
+	changed.Digest = "other"
+	if SameObservation(base, changed) {
+		t.Fatal("different observations match")
 	}
 }

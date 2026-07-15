@@ -49,6 +49,29 @@ func TestSyncMissingManifestIsOperationalError(t *testing.T) {
 		t.Fatal("Sync() error = nil")
 	}
 }
+
+func TestSyncValidatesRootAndPropagatesStateLoadErrors(t *testing.T) {
+	service, _ := testService(testResolved())
+	if _, err := service.Sync(context.Background(), SyncRequest{}); err == nil {
+		t.Fatal("expected missing root error")
+	}
+	lockRoot := t.TempDir()
+	syncManifest(t, lockRoot)
+	if err := os.WriteFile(filepath.Join(lockRoot, repositorystate.LockfileFileName), []byte("schema_version: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: lockRoot}); err == nil {
+		t.Fatal("expected lockfile load error")
+	}
+	recordRoot := t.TempDir()
+	syncManifest(t, recordRoot)
+	if err := os.WriteFile(filepath.Join(recordRoot, repositorystate.MaterializationRecordFileName), []byte("schema_version: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: recordRoot}); err == nil {
+		t.Fatal("expected materialization record load error")
+	}
+}
 func TestSyncEmptyManifestNoOp(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root)

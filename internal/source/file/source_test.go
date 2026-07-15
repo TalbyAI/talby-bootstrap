@@ -2,10 +2,11 @@ package file
 
 import (
 	"context"
-	"github.com/talby/talby-bootstrap/internal/source"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/talby/talby-bootstrap/internal/source"
 )
 
 func write(t *testing.T, path, content string) {
@@ -135,5 +136,83 @@ func TestResolveRejectsArtifactDescriptorSymlinkEscapingArtifactRoot(t *testing.
 	}
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
 		t.Fatal("Resolve() error = nil, want containment rejection")
+	}
+}
+
+func TestCapabilitiesProvideIdentity(t *testing.T) {
+	if !New().Capabilities().ProvidesIdentity {
+		t.Fatal("file source must provide identity")
+	}
+}
+
+func TestValidateSourceDescriptorRejectsInvalidFieldsAndDuplicates(t *testing.T) {
+	valid := sourceDescriptor{SchemaVersion: supportedSchemaVersion, Artifacts: []artifactRef{{Name: "a", Path: "a"}}}
+	valid.Source.Name = "source"
+	invalidSchema := valid
+	invalidSchema.SchemaVersion = 2
+	if validateSourceDescriptor(invalidSchema) == nil {
+		t.Fatal("expected schema rejection")
+	}
+	missingName := valid
+	missingName.Source.Name = ""
+	if validateSourceDescriptor(missingName) == nil {
+		t.Fatal("expected source name rejection")
+	}
+	incomplete := valid
+	incomplete.Artifacts[0].Path = ""
+	if validateSourceDescriptor(incomplete) == nil {
+		t.Fatal("expected incomplete artifact rejection")
+	}
+	duplicate := valid
+	duplicate.Artifacts = append(duplicate.Artifacts, artifactRef{Name: "a", Path: "other"})
+	if validateSourceDescriptor(duplicate) == nil {
+		t.Fatal("expected duplicate artifact rejection")
+	}
+}
+
+func TestValidateArtifactDescriptorRejectsSchemaNameAndVersion(t *testing.T) {
+	ref := artifactRef{Name: "a", Path: "a"}
+	valid := artifactDescriptor{SchemaVersion: supportedSchemaVersion, Steps: []artifactStep{{Type: "file", Path: "out", Source: "in"}}}
+	valid.Artifact.Name, valid.Artifact.Version = "a", "1"
+	invalidSchema := valid
+	invalidSchema.SchemaVersion = 2
+	if validateArtifactDescriptor(ref, invalidSchema) == nil {
+		t.Fatal("expected schema rejection")
+	}
+	wrongName := valid
+	wrongName.Artifact.Name = "b"
+	if validateArtifactDescriptor(ref, wrongName) == nil {
+		t.Fatal("expected name rejection")
+	}
+	missingVersion := valid
+	missingVersion.Artifact.Version = ""
+	if validateArtifactDescriptor(ref, missingVersion) == nil {
+		t.Fatal("expected version rejection")
+	}
+}
+
+func TestResolveRejectsMalformedDescriptorsAndFileSteps(t *testing.T) {
+	root := fixture(t)
+	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: [")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected malformed source descriptor")
+	}
+
+	root = fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: [")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected malformed artifact descriptor")
+	}
+
+	root = fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    source: in\n")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected missing target path rejection")
+	}
+
+	root = fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    path: out\n")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected missing source rejection")
 	}
 }

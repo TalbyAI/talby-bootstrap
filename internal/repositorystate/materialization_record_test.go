@@ -40,3 +40,47 @@ func TestMaterializationRecordArtifactLookupUsesSourceAndArtifactName(t *testing
 		t.Fatal("missing artifact")
 	}
 }
+
+func TestUpsertManagedArtifactInsertsReplacesAndSorts(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+	b := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "b", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "z", Digest: digest}, {Path: "a", Digest: digest}}}
+	a := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "a", Digest: digest}}}
+	record := UpsertManagedArtifact(MaterializationRecord{}, b)
+	record = UpsertManagedArtifact(record, a)
+	if record.Artifacts[0].Artifact != "a" || record.Artifacts[1].Files[0].Path != "a" {
+		t.Fatalf("inserted record not sorted: %#v", record)
+	}
+	b.ArtifactVersion = "2"
+	record = UpsertManagedArtifact(record, b)
+	if got, ok := record.Artifact(ArtifactKey{Source: source, Name: "b"}); !ok || got.ArtifactVersion != "2" {
+		t.Fatalf("replaced artifact = %#v, %v", got, ok)
+	}
+	if _, ok := record.Artifact(ArtifactKey{Source: source, Name: "missing"}); ok {
+		t.Fatal("unexpected artifact")
+	}
+}
+
+func TestValidateMaterializationRecordRejectsOwnerFilesPathsAndDigests(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+	valid := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "a", Digest: digest}}}
+	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{valid, valid}}) == nil {
+		t.Fatal("expected duplicate owner rejection")
+	}
+	missingFiles := valid
+	missingFiles.Files = nil
+	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{missingFiles}}) == nil {
+		t.Fatal("expected missing files rejection")
+	}
+	badPath := valid
+	badPath.Files = []ManagedFileRecord{{Path: "a/../b", Digest: digest}}
+	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{badPath}}) == nil {
+		t.Fatal("expected non-canonical path rejection")
+	}
+	badDigest := valid
+	badDigest.Files = []ManagedFileRecord{{Path: "a", Digest: strings.Repeat("A", 64)}}
+	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{badDigest}}) == nil {
+		t.Fatal("expected digest rejection")
+	}
+}
