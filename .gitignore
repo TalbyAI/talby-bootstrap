@@ -16,6 +16,7 @@
 # Temporary files
 .tmp-*
 tmp/
+.superpowers/
 
 # Coverage artifacts
 coverage.out
