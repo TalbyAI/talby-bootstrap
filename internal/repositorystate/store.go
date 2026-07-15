@@ -95,6 +95,12 @@ type materializationManagedFileDTO struct {
 	Digest string `yaml:"digest"`
 }
 
+func decodeYAML(data []byte, value any) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	return decoder.Decode(value)
+}
+
 func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) {
 	bytes, err := os.ReadFile(filepath.Join(root, ManifestFileName))
 	if err != nil {
@@ -108,7 +114,7 @@ func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) 
 	}
 
 	var doc manifestDocument
-	if err := yaml.Unmarshal(bytes, &doc); err != nil {
+	if err := decodeYAML(bytes, &doc); err != nil {
 		return Manifest{}, StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: err}
 	}
 	if doc.SchemaVersion != supportedSchemaVersion {
@@ -190,7 +196,7 @@ func (fileStore) LoadLockfile(_ context.Context, root string) (Lockfile, error) 
 	}
 
 	var doc lockfileDocument
-	if err := yaml.Unmarshal(bytes, &doc); err != nil {
+	if err := decodeYAML(bytes, &doc); err != nil {
 		return Lockfile{}, StateFileError{File: StateFileLockfile, Kind: StateFileErrorInvalidFormat, Err: err}
 	}
 	if doc.SchemaVersion != supportedSchemaVersion {
@@ -260,7 +266,7 @@ func (fileStore) LoadMaterializationRecord(_ context.Context, root string) (Mate
 	}
 
 	var doc materializationRecordDocument
-	if err := yaml.Unmarshal(bytes, &doc); err != nil {
+	if err := decodeYAML(bytes, &doc); err != nil {
 		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: err}
 	}
 	if doc.SchemaVersion != supportedSchemaVersion {

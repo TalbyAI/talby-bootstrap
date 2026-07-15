@@ -188,10 +188,16 @@ func verifyLocked(d repositorystate.Declaration, locked repositorystate.Resoluti
 	return selected, nil
 }
 func preflightFiles(root string, desired []desiredArtifact, record repositorystate.MaterializationRecord) ([]plannedFile, []Conflict, error) {
+	activeInputs := map[string]struct{}{}
+	for _, artifact := range desired {
+		for _, input := range artifact.InputPaths {
+			activeInputs[materialize.PathKey(input)] = struct{}{}
+		}
+	}
 	owners := map[string]repositorystate.ArtifactKey{}
 	for _, a := range record.Artifacts {
 		for _, f := range a.Files {
-			owners[f.Path] = repositorystate.ManagedArtifactKey(a)
+			owners[materialize.PathKey(filepath.FromSlash(f.Path))] = repositorystate.ManagedArtifactKey(a)
 		}
 	}
 	var files []plannedFile
@@ -239,10 +245,8 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 					return nil, nil, fmt.Errorf("target %q is reserved", step.TargetPath)
 				}
 			}
-			for _, input := range artifact.InputPaths {
-				if materialize.PathKey(input) == path {
-					return nil, nil, fmt.Errorf("target %q overlaps source input", step.TargetPath)
-				}
+			if _, ok := activeInputs[path]; ok {
+				return nil, nil, fmt.Errorf("target %q overlaps source input", step.TargetPath)
 			}
 			if other, ok := claimed[path]; ok && other.Key != artifact.Key {
 				conflicts = append(conflicts, Conflict{Kind: ConflictOwnership, Source: artifact.Key.Source, Artifact: artifact.Key.Name, Paths: []string{observed.Path}})
@@ -251,15 +255,16 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 			claimed[path] = artifact
 			digest := materialize.Digest(step.SourceBytes)
 			change := ChangeFileCreated
-			if owner, ok := owners[observed.Path]; ok && owner != artifact.Key {
+			ownerKey := materialize.PathKey(filepath.FromSlash(observed.Path))
+			if owner, ok := owners[ownerKey]; ok && owner != artifact.Key {
 				conflicts = append(conflicts, Conflict{Kind: ConflictOwnership, Source: artifact.Key.Source, Artifact: artifact.Key.Name, Paths: []string{observed.Path}})
 				continue
 			}
-			if owner, ok := owners[observed.Path]; ok {
+			if owner, ok := owners[ownerKey]; ok {
 				managed, _ := record.Artifact(owner)
 				recorded := ""
 				for _, f := range managed.Files {
-					if f.Path == observed.Path {
+					if materialize.PathKey(filepath.FromSlash(f.Path)) == ownerKey {
 						recorded = f.Digest
 					}
 				}
@@ -356,12 +361,8 @@ func revalidateAdoptions(files []plannedFile) error {
 		if file.Change != ChangeOwnershipAdopted {
 			continue
 		}
-		current, err := materialize.Observe(file.Observed.Root, file.Observed.Path)
-		if err != nil {
+		if err := materialize.Revalidate(file.Observed); err != nil {
 			return err
-		}
-		if !materialize.SameObservation(file.Observed, current) {
-			return materialize.ChangedSincePreflightError{Path: file.Observed.Path}
 		}
 	}
 	return nil

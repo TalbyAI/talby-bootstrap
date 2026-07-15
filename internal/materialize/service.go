@@ -3,6 +3,7 @@ package materialize
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,10 +30,12 @@ type Observation struct {
 	Digest       string
 }
 type ChangedSincePreflightError struct{ Path string }
+type targetParentError struct{}
 
 func (err ChangedSincePreflightError) Error() string {
 	return fmt.Sprintf("target %q changed after preflight", err.Path)
 }
+func (targetParentError) Error() string { return "target parent must be a real directory" }
 func Observe(root, target string) (Observation, error) {
 	if filepath.IsAbs(target) {
 		return Observation{}, fmt.Errorf("file target path must stay within operation root")
@@ -55,7 +58,7 @@ func Observe(root, target string) (Observation, error) {
 			return Observation{}, err
 		}
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return Observation{}, fmt.Errorf("target parent must be a real directory")
+			return Observation{}, targetParentError{}
 		}
 	}
 	ob := Observation{Root: canonicalRoot, Path: filepath.ToSlash(clean), AbsolutePath: absolute, Kind: EntryAbsent}
@@ -93,13 +96,23 @@ func PathKey(path string) string {
 func SameObservation(a, b Observation) bool {
 	return a.Root == b.Root && a.Path == b.Path && a.AbsolutePath == b.AbsolutePath && a.Kind == b.Kind && a.Mode.Perm() == b.Mode.Perm() && a.Digest == b.Digest
 }
-func Write(observed Observation, content []byte) error {
+func Revalidate(observed Observation) error {
 	current, err := Observe(observed.Root, observed.Path)
 	if err != nil {
+		var parent targetParentError
+		if errors.As(err, &parent) {
+			return ChangedSincePreflightError{Path: observed.Path}
+		}
 		return err
 	}
 	if !SameObservation(observed, current) {
 		return ChangedSincePreflightError{Path: observed.Path}
+	}
+	return nil
+}
+func Write(observed Observation, content []byte) error {
+	if err := Revalidate(observed); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(observed.AbsolutePath), 0755); err != nil {
 		return err

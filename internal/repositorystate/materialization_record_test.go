@@ -1,6 +1,22 @@
 package repositorystate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestValidateMaterializationRecordAcceptsSlashNormalizedNestedPath(t *testing.T) {
+	record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{
+		Source:          SourceIdentity{Type: "file", Locator: "source"},
+		ResolvedVersion: "snapshot",
+		Artifact:        "a",
+		ArtifactVersion: "1",
+		Files:           []ManagedFileRecord{{Path: "dir/file", Digest: strings.Repeat("a", 64)}},
+	}}}
+	if err := ValidateMaterializationRecord(record); err != nil {
+		t.Fatalf("ValidateMaterializationRecord() error = %v", err)
+	}
+}
 
 func TestValidateMaterializationRecordRequiresExactVersionsAndUniquePaths(t *testing.T) {
 	r := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{Source: SourceIdentity{Type: "file", Locator: "x"}, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "x", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}

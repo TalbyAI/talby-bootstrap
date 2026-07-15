@@ -3,9 +3,18 @@ package repositorystate
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
+
+func managedPathKey(path string) string {
+	path = filepath.Clean(filepath.FromSlash(path))
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
+}
 
 func ValidateMaterializationRecord(record MaterializationRecord) error {
 	owners := map[ArtifactKey]struct{}{}
@@ -23,16 +32,18 @@ func ValidateMaterializationRecord(record MaterializationRecord) error {
 			return fmt.Errorf("managed artifact requires files")
 		}
 		for _, f := range a.Files {
-			if f.Path == "" || filepath.IsAbs(f.Path) || filepath.Clean(f.Path) != f.Path {
+			native := filepath.FromSlash(f.Path)
+			if f.Path == "" || filepath.IsAbs(native) || filepath.ToSlash(filepath.Clean(native)) != f.Path {
 				return fmt.Errorf("managed file path must be canonical")
 			}
 			if len(f.Digest) != 64 || strings.Trim(f.Digest, "0123456789abcdef") != "" {
 				return fmt.Errorf("managed file digest must be a lowercase hex sha256")
 			}
-			if _, ok := paths[f.Path]; ok {
+			key := managedPathKey(f.Path)
+			if _, ok := paths[key]; ok {
 				return fmt.Errorf("managed file path has multiple owners")
 			}
-			paths[f.Path] = struct{}{}
+			paths[key] = struct{}{}
 		}
 	}
 	return nil

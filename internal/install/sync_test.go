@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/talby/talby-bootstrap/internal/materialize"
@@ -221,6 +222,24 @@ func TestSyncRejectsReservedAndActiveSourceInputTargets(t *testing.T) {
 		}
 	}
 }
+func TestPreflightRejectsTargetOverlappingAnotherSourceInput(t *testing.T) {
+	root := t.TempDir()
+	desired := []desiredArtifact{
+		{
+			Key:        repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source-a"}, Name: "a"},
+			Descriptor: testArtifact("a", "input"),
+		},
+		{
+			Key:        repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source-b"}, Name: "b"},
+			Descriptor: testArtifact("b", "output"),
+			InputPaths: []string{filepath.Join(root, "input")},
+		},
+	}
+
+	if _, _, err := preflightFiles(root, desired, repositorystate.MaterializationRecord{}); err == nil || !strings.Contains(err.Error(), "overlaps source input") {
+		t.Fatalf("preflightFiles() error = %v, want cross-Source input overlap", err)
+	}
+}
 func TestSyncRejectsNonRegularUnownedTarget(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root, artifactDeclaration("a"))
@@ -290,6 +309,48 @@ func TestPersistPreparedClassifiesWriteRaceAsDrift(t *testing.T) {
 	var conflict UserActionError
 	if !errors.As(err, &conflict) || len(conflict.Result.Conflicts) != 1 || conflict.Result.Conflicts[0].Kind != ConflictDrift || conflict.Result.Conflicts[0].Source != artifact.Key.Source || conflict.Result.Conflicts[0].Artifact != artifact.Key.Name || conflict.Result.Conflicts[0].Paths[0] != "target" {
 		t.Fatalf("persistPrepared() error = %T %v, want target drift", err, err)
+	}
+}
+func TestPersistPreparedClassifiesAdoptionParentRaceAsDrift(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	target := filepath.Join(root, "parent", "target")
+	if err := os.Mkdir(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := materialize.Observe(root, "parent/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Dir(target)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Dir(target)); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	artifact := desiredArtifact{
+		Key:             repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Name: "a"},
+		Resolution:      repositorystate.ArtifactResolution{Name: "a", Version: "1"},
+		ResolvedVersion: "snapshot",
+		Descriptor:      testArtifact("a", "parent/target"),
+	}
+	prepared := preparedOperation{
+		Desired: []desiredArtifact{artifact},
+		Files: []plannedFile{{
+			Artifact: artifact,
+			Step:     artifact.Descriptor.Steps[0],
+			Observed: observed,
+			Digest:   materialize.Digest([]byte("a")),
+			Change:   ChangeOwnershipAdopted,
+		}},
+	}
+
+	_, err = (Service{}).persistPrepared(context.Background(), root, "sync", prepared, nil)
+	var conflict UserActionError
+	if !errors.As(err, &conflict) || len(conflict.Result.Conflicts) != 1 || conflict.Result.Conflicts[0].Kind != ConflictDrift {
+		t.Fatalf("persistPrepared() error = %T %v, want adoption drift", err, err)
 	}
 }
 func TestSyncReportsMissingManagedFileAsDrift(t *testing.T) {

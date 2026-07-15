@@ -3,7 +3,7 @@ resolutions:
   - source:
       type: file
       locator: .tbboot-example/sources/local-example-source
-    resolved_version: local-snapshot-03cab323e9b749253e407d73a49bd39e833a268bb4b8507266acf28b3d69df4a
+    resolved_version: local-snapshot-970ba7b09a3a0c6dbf5c89a771593ccde29dc5d51c5d78afadef0beb87289076
     artifacts:
       - name: base-readme
         version: 1.0.0

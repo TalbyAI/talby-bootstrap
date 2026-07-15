@@ -40,6 +40,23 @@ func TestWriteRejectsChangedTargetSinceObservation(t *testing.T) {
 	}
 }
 
+func TestWriteClassifiesParentTopologyRaceAsChanged(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	observed, err := Observe(root, "parent/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "parent")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+
+	err = Write(observed, []byte("desired"))
+	var changed ChangedSincePreflightError
+	if !errors.As(err, &changed) {
+		t.Fatalf("Write() error = %T %v, want ChangedSincePreflightError", err, err)
+	}
+}
+
 func TestObserveRejectsExistingSymlinkPathComponent(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {

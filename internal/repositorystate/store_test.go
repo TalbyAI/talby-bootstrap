@@ -107,3 +107,28 @@ func TestStoreRejectsInvalidStateFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadManifestRejectsUnknownField(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ManifestFileName), []byte("schema_version: 1\nunknown: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewStore().LoadManifest(context.Background(), root)
+	var state StateFileError
+	if !errors.As(err, &state) || state.File != StateFileManifest || state.Kind != StateFileErrorInvalidFormat {
+		t.Fatalf("LoadManifest() error = %T %v, want invalid-format Manifest", err, err)
+	}
+}
+
+func TestLoadManifestRejectsInputVersion(t *testing.T) {
+	root := t.TempDir()
+	data := "schema_version: 1\ndeclarations:\n  - source:\n      type: file\n      locator: source\n    target:\n      scope: source\n    input:\n      locator: source\n      version: v1\n"
+	if err := os.WriteFile(filepath.Join(root, ManifestFileName), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewStore().LoadManifest(context.Background(), root)
+	var state StateFileError
+	if !errors.As(err, &state) || state.File != StateFileManifest || state.Kind != StateFileErrorInvalidFormat {
+		t.Fatalf("LoadManifest() error = %T %v, want invalid-format Manifest", err, err)
+	}
+}

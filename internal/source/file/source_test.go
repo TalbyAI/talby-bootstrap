@@ -43,6 +43,26 @@ func TestResolveCapturesFileBytesAndEveryInputPath(t *testing.T) {
 		t.Fatalf("InputPaths count = %d, want source descriptor, artifact descriptor, and step input", len(got.InputPaths))
 	}
 }
+func TestResolveFramesSnapshotPayloads(t *testing.T) {
+	root := fixture(t)
+	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    path: a\n    source: one\n  - type: file\n    path: b\n    source: two\n")
+	write(t, filepath.Join(root, "a", "one"), "x")
+	write(t, filepath.Join(root, "a", "two"), "b\x00z")
+	first, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	write(t, filepath.Join(root, "a", "one"), "xb\x00")
+	write(t, filepath.Join(root, "a", "two"), "z")
+	second, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Identity.Version == second.Identity.Version {
+		t.Fatalf("snapshot versions match for different payloads: %q", first.Identity.Version)
+	}
+}
 func TestResolveRejectsEmptySourceArtifactList(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts: []\n")

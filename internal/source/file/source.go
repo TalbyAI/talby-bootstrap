@@ -3,11 +3,13 @@ package file
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/talby/talby-bootstrap/internal/source"
 	"gopkg.in/yaml.v3"
+	"hash"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +49,12 @@ type Source struct{}
 
 func New() Source                                { return Source{} }
 func (Source) Capabilities() source.Capabilities { return source.Capabilities{ProvidesIdentity: true} }
+func writeSnapshotField(snapshot hash.Hash, value []byte) {
+	var size [8]byte
+	binary.BigEndian.PutUint64(size[:], uint64(len(value)))
+	_, _ = snapshot.Write(size[:])
+	_, _ = snapshot.Write(value)
+}
 func canonicalExistingDir(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -90,7 +98,7 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 	}
 	resolved := source.ResolvedSource{Identity: source.Identity{Type: "file", Name: descriptor.Source.Name}, Artifacts: make([]source.ArtifactDescriptor, 0, len(descriptor.Artifacts)), InputPaths: []string{sourcePath}}
 	snapshot := sha256.New()
-	snapshot.Write(sourceBytes)
+	writeSnapshotField(snapshot, sourceBytes)
 	for _, ref := range descriptor.Artifacts {
 		dir, err := canonicalContained(root, filepath.Join(root, ref.Path), "artifact path must stay within source root")
 		if err != nil {
@@ -119,11 +127,9 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 			return source.ResolvedSource{}, fmt.Errorf("parse %s: %w", artifactPath, err)
 		}
 		resolved.InputPaths = append(resolved.InputPaths, artifactPath)
-		snapshot.Write([]byte(ref.Name))
-		snapshot.Write([]byte{0})
-		snapshot.Write([]byte(ref.Path))
-		snapshot.Write([]byte{0})
-		snapshot.Write(data)
+		writeSnapshotField(snapshot, []byte(ref.Name))
+		writeSnapshotField(snapshot, []byte(ref.Path))
+		writeSnapshotField(snapshot, data)
 		steps := make([]source.MaterializationStep, 0, len(artifact.Steps))
 		for _, step := range artifact.Steps {
 			if step.Path == "" {
@@ -144,9 +150,8 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 				}
 				out.SourceBytes = bytes
 				resolved.InputPaths = append(resolved.InputPaths, input)
-				snapshot.Write([]byte(step.Path))
-				snapshot.Write([]byte{0})
-				snapshot.Write(bytes)
+				writeSnapshotField(snapshot, []byte(step.Path))
+				writeSnapshotField(snapshot, bytes)
 			}
 			steps = append(steps, out)
 		}

@@ -41,7 +41,7 @@ Phase 1 uses these product rules:
 - Sync performs no partial apply when preflight detects any conflict.
 - Direct `file:` Source Identity is its Source Type plus its canonical locator. The published Source name is metadata, not consumer identity.
 - Relative `file:` locators are interpreted against the Operation Root and persisted in normalized root-relative form. Approved external locators are persisted in canonical absolute form.
-- Phase 1 does not expose `--source-version` because its only real Source, `file:`, cannot select historical versions. `Manifest.Input.Version` remains reserved for a later version-selecting Source.
+- Phase 1 does not expose `--source-version` because its only real Source, `file:`, cannot select historical versions. The Manifest reserves no requested-version field; a future version-selecting Source may introduce one with its own design.
 
 ## Architecture
 
@@ -121,8 +121,7 @@ The direct `file:` Source Identity change replaces the undeployed schema-version
 - A Source Identity may have one source-level declaration or one or more artifact-level declarations, but not both scopes.
 - Duplicate declaration targets are invalid on load and rejected during updates.
 - For direct `file:` declarations, Source Identity contains the normalized locator. A preserved `Manifest.Input.Locator` is optional original-reference metadata; when present, it must normalize to the identity locator or the Manifest is invalid.
-- `Manifest.Input.Version` remains an optional requested Source version field for future version-selecting Sources. Phase 1 CLI does not populate it.
-- A non-empty requested version for a Source that does not report version-selection support is invalid persisted state with exit code `1`; `file:` never ignores it.
+- `Manifest.Input` contains only the optional preserved locator. Unknown Manifest fields, including `Input.Version`, are invalid persisted state with exit code `1` rather than ignored extension points.
 - Exact resolved Source and Artifact versions belong only in the Lockfile.
 
 The `file:` generated local snapshot hash remains an exact resolved version used for later drift-safe replay, not a selectable historical version.
@@ -160,7 +159,7 @@ A missing Manifest is an operational error with exit code `1`; it is not interpr
 For each declaration:
 
 - if a compatible locked resolution exists, Sync uses it exactly;
-- if no locked resolution exists, Sync resolves the declaration using its canonical Source Identity and optional persisted requested version;
+- if no locked resolution exists, Sync resolves the declaration using its canonical Source Identity;
 - if persisted locked state is structurally incompatible with its declaration, Sync returns a validation error instead of repairing or re-resolving it.
 
 Compatibility is verified against newly resolved content, not inferred from lookup alone. Artifact scope requires the same Source Identity, resolved Source version, Artifact name, and Artifact version. Source scope additionally requires the exact complete Artifact name-and-version set from its single snapshot. Any mismatch is an invalid or unavailable exact resolution; Sync does not repair the Lockfile.
@@ -271,7 +270,7 @@ Focused `internal/install` tests cover:
 - mixed-scope rejection;
 - direct `file:` identity and locator normalization;
 - rejection of mismatched identity and preserved input locator;
-- rejection of requested versions for Sources without version-selection support;
+- rejection of unknown persisted fields, including `Manifest.Input.Version`;
 - first Sync resolution of declarations without Lockfile entries;
 - exact replay of existing resolutions;
 - exact replay without implicit upgrade during repeated explicit install;
