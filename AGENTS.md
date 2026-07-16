@@ -61,3 +61,17 @@ Agents should use the `caveman` skill by default for responses unless the user e
 During brainstorming, a request for context, implications, examples, or trade-offs does not answer the current question. Answer the clarification, then restate the same question and wait for an explicit decision. Do not advance to another design question while the current one remains unanswered.
 
 Agents must not create commits without asking the user for confirmation at that moment and receiving an explicit approval. Prior general permission is not enough; the agent must pause, state that it intends to create a commit, and wait for a clear user confirmation before running the commit. Agents may still suggest concise commit messages when helpful.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub; external pull requests are not a triage surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository with `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
