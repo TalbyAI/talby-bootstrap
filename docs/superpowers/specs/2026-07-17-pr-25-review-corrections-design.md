@@ -2,7 +2,7 @@
 
 ## Goal
 
-Resolve the three open CodeRabbit findings on PR 25 while keeping the v1 command surface and documentation internally consistent.
+Resolve the open PR 25 findings and the review-found documentation contradictions while keeping the v1 command surface internally consistent.
 
 ## Decisions
 
@@ -13,6 +13,7 @@ Resolve the three open CodeRabbit findings on PR 25 while keeping the v1 command
 - Source-scoped upgrade updates every declared Artifact in that Source snapshot. Artifact-scoped upgrade updates only the selected Artifact and leaves sibling Artifacts on their existing snapshots.
 - Upgrade leaves the Manifest unchanged and updates only the affected Lockfile resolutions.
 - Only the ADR-0005 title is changed to sentence case; older ADR title cleanup is outside this PR.
+- V1 has immediate diagnostics only: no `logs` command, persisted Operation Logs, replay, operation identifiers, retention policy, or verbosity levels.
 
 ## Documentation changes
 
@@ -22,6 +23,10 @@ Update ADR-0002 so its Source versioning decision distinguishes published `git:`
 
 Update the ADR-0005 heading to sentence case.
 
+Update ADR-0001, `ARCHITECTURE.md`, and `UBIQUITOUS_LANGUAGE.md` so the active canonical documentation no longer promises logs, replay, or verbosity. Keep auditability through immediate provenance and deterministic operation output.
+
+Update the remaining version-selection summary in `CONTEXT.md` so it distinguishes `git:` latest-stable resolution from `file:` re-snapshot behavior.
+
 No Go behavior changes are part of this correction.
 
 ## Validation
@@ -29,3 +34,4 @@ No Go behavior changes are part of this correction.
 - Run `just check-md`.
 - Search for `install --upgrade` and confirm no remaining text claims v1 support.
 - Inspect the changed upgrade statements for agreement between `CONTEXT.md` and ADR-0002.
+- Search active canonical documentation for logs, replay, and verbosity promises; none may remain.

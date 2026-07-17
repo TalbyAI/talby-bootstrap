@@ -575,7 +575,7 @@ This section preserves the current specification interview state by explicit use
     - first successful `install` creates the **Lockfile** when only a **Manifest** exists
     - the **Manifest** stores enough source identity to re-resolve stably if the **Lockfile** is lost or regenerated
     - only stable source identity is normative in the **Manifest**; original user-facing references are optional metadata only
-    - v1 adds no extra version-selection controls beyond direct-install `--source-version` and default upgrade-to-latest-stable-allowed behavior
+    - v1 adds no extra version-selection controls beyond direct-install `--source-version`; `git:` upgrade selects the latest stable published Source Version allowed by policy, while `file:` upgrade records a fresh local snapshot hash
   - Still open:
     - none for v1
 
