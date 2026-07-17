@@ -133,11 +133,11 @@ A non-mutating execution of reconciliation that resolves the intended changes an
 _Avoid_: Apply, install
 
 **JSON Output Envelope**:
-The canonical machine-readable output shape for CLI commands when JSON output is requested. The initial envelope contains `code`, `message`, and `details`.
+The canonical machine-readable output shape for CLI commands when JSON output is requested. It always contains `code`, `message`, `details`, and `warnings`; empty details and warnings use `{}` and `[]` rather than being omitted or set to null. Operation details always contain `operation`, `outcome`, and `dry_run`; other fields are present only when known and relevant, and absent optional fields are omitted rather than set to null.
 _Avoid_: Ad hoc JSON, command-specific envelope
 
 **Exit Code**:
-The canonical process result code returned by the CLI to classify overall command outcome for shells, CI, and automation. When a command would require an interactive prompt but is running non-interactively or with JSON output, it fails with exit code `2`.
+The canonical process result code returned by the CLI to classify overall command outcome for shells, CI, and automation. V1 uses `0` for success, including no-op, Dry Run, and success with warnings; `1` for usage, validation, acquisition, unavailable Resolution, I/O, cancellation, rollback, and other operational failures; `2` for user-action conflicts and unresolved Recovery State; and `3` for Trust Policy denial.
 _Avoid_: Message parsing, ad hoc status
 
 **CLI Command Name**:
@@ -165,40 +165,16 @@ The primary user-facing command for artifact management. The canonical command i
 _Avoid_: sync command, add command
 
 **Upgrade Command**:
-The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With one explicit target, it accepts the same unambiguous source forms as `install`, optionally narrowed with `--artifact`. V1 does not accept multiple explicit upgrade targets in a single command. Source targets upgrade the whole declared source; `--artifact` upgrades only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. Bare `upgrade` applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. By default it advances each eligible target to the latest stable published version allowed by the active trust policy. Versions skipped because of trust or age rules are reported in more verbose output, not in the default short summary. The canonical command name is `upgrade`; `install --upgrade` is an equivalent shortcut when the user wants install-style targeting with upgrade behavior.
+The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With one explicit target, it accepts the same unambiguous source forms as `install`, optionally narrowed with `--artifact`. V1 does not accept multiple explicit upgrade targets in a single command. Source targets upgrade the whole declared source; `--artifact` upgrades only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. Bare `upgrade` applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. For `git:` targets, upgrade advances to the latest stable published Source Version allowed by the active trust policy. For `file:` targets, upgrade re-reads the current local path and records the resulting snapshot hash; an unchanged snapshot is a no-op. These rules apply to both bare and explicit upgrade: Source scope updates every declared Artifact in the Source snapshot, while Artifact scope updates only the selected Artifact and leaves sibling Artifacts on their existing snapshots. The canonical command name is `upgrade`.
 _Avoid_: Sync alias, catalog refresh
 
 **Operation Summary**:
-The default short human-readable output shown after a successful install or sync. It uses one stable, concise shape across human-facing commands: a one-line result followed by effective changes only when present. For materialization commands it reports what sources or artifacts were reconciled, how many changes were applied, and the **Provenance Summary** for effective changes only. Additional detail lives behind **Verbosity Level** selection or the **Logs Command**.
+The default short human-readable output shown after install, Sync, and upgrade. Success uses one stable result line followed only by effective changes, or planned changes during Dry Run. Failures use one concise cause line followed only by actionable typed details. Success is written to standard output, failure to standard error, and human warnings use a `warning:` prefix on standard error.
 _Avoid_: Full verbose log, success-only silence
 
-**Operation Log**:
-The more verbose record of what happened during an install or sync, intended for follow-up inspection after the default short summary. The same operation may be rendered later at different verbosity levels without re-running the materialization itself.
-_Avoid_: Default output, transient debug spew
-
-**Verbosity Level**:
-The canonical named detail level used when rendering command output or replaying an **Operation Log**. V1 defines exactly three levels: `summary`, `normal`, and `verbose`, selected canonically with `--verbosity` and optionally via shorthand aliases such as `-v` and `-vv`.
-_Avoid_: Ad hoc per-command levels, numeric-only guess
-
-**Operation ID**:
-The stable identifier assigned to a recorded CLI operation so it can be listed and inspected later.
-_Avoid_: Ephemeral console line, implicit history position
-
-**Logs Command**:
-The lowercase `logs` command surface used to inspect recorded operations scoped to an **Operation Root**. Without additional arguments, it replays the most recent recorded operation for that root. Listing recorded operations is explicit via `logs ls` or `logs list`. Past operations may be inspected by **Operation ID** at a chosen verbosity level. When inspecting a recorded operation without an explicit verbosity override, it re-renders the log at the operation's original verbosity level. List output is sorted by descending date by default while allowing explicit sort flags.
-_Avoid_: Install-only subcommand, debug flag
-
-**Operation Retention Policy**:
-The rule that limits how many recorded operations and how much history the local operation log keeps in the **User Configuration Directory**.
-_Avoid_: Unlimited history, session-only guess
-
 **Operation Root**:
-The root path used to scope recorded operations for `logs`. If the current location belongs to a Git repository, the operation root is the repository root; otherwise it is the current local folder.
+The consumer root used to resolve relative Source References and scope repository state and materialization. If the current location belongs to a Git repository, the Operation Root is the repository root; otherwise it is the current local folder.
 _Avoid_: Session cwd only, global implicit scope
-
-**Operation Root Key**:
-The stable storage key derived from a normalized **Operation Root** to store recorded operations under the **User Configuration Directory**. The root path itself is preserved as readable metadata alongside the stored logs.
-_Avoid_: Raw long path, ad hoc folder name
 
 **Declare-Only Install**:
 An **Install Command** mode enabled by `--declare-only` that updates only the **Manifest** without materializing artifacts, updating the **Lockfile**, or touching cache state. This remains true for direct source installs and catalog-qualified installs.
@@ -249,7 +225,7 @@ The tracked record of what a **Managed Artifact** wrote into the target reposito
 _Avoid_: Best-effort guess, inferred state
 
 **Provenance Summary**:
-The minimal user-visible identity shown for a managed change: artifact, source, source version, and whether the change owns a whole file or a fragment.
+The minimal user-visible identity shown for an effective or planned managed change: canonical Source Reference, Source Version, Artifact Name when applicable, canonical root-relative path when applicable, and ownership kind when applicable.
 _Avoid_: Opaque change, path-only report
 
 **Ownership Conflict**:
@@ -331,18 +307,10 @@ _Avoid_: Expected update, normal sync
 - A bare `install <name>` may proceed only when the matching catalog entries resolve to one unique source identity, or all hits collapse to the same source and source version
 - A command may render results through the **JSON Output Envelope** when machine-readable output is requested
 - An **Exit Code** classifies command outcome as success, operational error, user-action conflict, or trust/policy denial
-- A successful install or sync shows an **Operation Summary** by default
-- A successful install or sync may be inspected later through an **Operation Log**
-- A **Verbosity Level** controls how much detail a command or replayed operation shows
-- A recorded operation has one **Operation ID**
-- An **Operation Root** scopes recorded operations for `logs`
-- An **Operation Root Key** stores recorded operations for a normalized **Operation Root**
-- `logs` without additional arguments replays the most recent recorded operation for the current **Operation Root**
-- `logs ls` and `logs list` explicitly list recorded operations with their command type, date, and verbosity level
-- The **Logs Command** may re-render a recorded **Operation Log** for an **Operation ID** at a requested verbosity level
-- The **Logs Command** uses the operation's original verbosity level by default when inspecting a recorded **Operation ID**
-- The **Logs Command** lists operations in descending date order by default, with flags to choose a different sort order
-- The **Operation Retention Policy** keeps at most 100 recorded operations and no more than one week of history by default
+- Install, Sync, and upgrade show an **Operation Summary** immediately
+- A successful operation writes its result to standard output; a failed operation writes its result to standard error
+- Human warnings use standard error, while JSON warnings remain inside the single **JSON Output Envelope**
+- A **Provenance Summary** accompanies effective changes and planned Dry Run changes only
 - The **Catalog Management Surface** contains catalog configuration and **Catalog Refresh**
 - The **User Configuration Directory** stores **Catalog Cache** and other user-scoped configuration
 - The **User Configuration Directory** contains a `catalogs` subdirectory for **Catalog Cache**
@@ -490,21 +458,13 @@ _Avoid_: Expected update, normal sync
 - source-type sprawl could outpace the trust model — resolved: v1 supports only `file` and `git` as approvable **Source Types**
 - direct and catalog-qualified installs could collapse into one ambiguous syntax — resolved: typed-source installs use **Direct Install Reference**, while catalog-qualified installs use **Catalog Install Reference**
 - catalog-qualified source installs could diverge semantically from direct source installs — resolved: a **Catalog** is only an index of sources, so `{catalog-name}/{catalog-source-name}` without an artifact selector installs the same whole **Source** a direct reference would resolve
-- CLI output could fragment across human and automation use cases — resolved: v1 uses one **JSON Output Envelope** with `code`, `message`, and `details` when JSON output is requested
+- CLI output could fragment across human and automation use cases — resolved: v1 uses one **JSON Output Envelope** with always-present `code`, `message`, `details`, and `warnings` when JSON output is requested
 - error handling could become too granular or too vague for automation — resolved: v1 uses four **Exit Codes** only: `0` success, `1` operational or validation error, `2` user-action conflict, `3` trust or policy denial
 - whole-file drift could behave differently from fragment drift — resolved: whole-file managed content also prompts before update or removal when it no longer matches the prior **Materialization Record**
 - search results could fight the install mental model — resolved: **Search Command** returns **Sources** first, with artifact detail level controlled by output flags
 - catalog-qualified references could drift if local catalog names are unstable — resolved: each configured **Catalog** has a unique local name, and **Catalog Add** fails on local-name conflicts while reporting the conflicting catalog
-- default install output could be too noisy or too thin — resolved: success output defaults to a short **Operation Summary**, with deeper follow-up inspection available through an **Operation Log**
-- follow-up inspection could be tied too narrowly to install syntax — resolved: recorded operations are inspected through a separate **Logs Command** keyed by **Operation ID**, while commands may also choose verbosity at execution time
-- operation history could grow without bounds or disappear too quickly — resolved: the default **Operation Retention Policy** keeps at most 100 operations and no more than one week of history
-- operation history listing could feel arbitrary — resolved: **Logs Command** sorts by descending date by default, with explicit sort flags for other orders
-- follow-up inspection could lose the original user perspective — resolved: `logs <operation-id>` defaults to the operation's original verbosity level, with flags to re-render at a different level
-- logs scope could become ambiguous across repositories and folders — resolved: logs are scoped by **Operation Root**, using the Git repository root when present and the current folder otherwise
-- the default `logs` action could fight the likely user intent — resolved: bare `logs` replays the most recent operation, while listing history is explicit via `logs ls` or `logs list`
-- operation-log storage paths could become too long or brittle — resolved: each **Operation Root** is stored under a stable **Operation Root Key** derived from the normalized root path, while preserving the readable path as metadata
-- output detail could drift across commands — resolved: v1 uses exactly three **Verbosity Levels** named `summary`, `normal`, and `verbose`
-- verbosity selection could fragment across commands — resolved: commands use canonical `--verbosity <level>` with optional shorthand aliases like `-v` and `-vv`
+- default output could be too noisy or too thin — resolved: install, Sync, and upgrade emit one short **Operation Summary** followed only by effective or planned changes
+- persisted diagnostics could add unsupported complexity — resolved: v1 has immediate output only, with no persisted logs, replay, operation identifiers, retention, or verbosity levels
 - catalog naming could stay too implicit at creation time — resolved: `catalog add <catalog-reference> --name <local-name>` is the canonical form, with default-name fallback only when non-conflicting
 - catalog status output could be too thin to operate safely — resolved: `catalog list` defaults to `local-name`, `catalog-reference`, `cache-status`, `last-refresh`, and `last-refresh-result`
 - catalog refresh scope could diverge from global search/install resolution — resolved: `catalog refresh` without arguments refreshes all configured catalogs
@@ -519,8 +479,8 @@ _Avoid_: Expected update, normal sync
 - the underlying **Sync** operation could be mistaken for a top-level CLI command — resolved: users trigger reconciliation through bare `install`, while **Sync** remains the underlying operation name
 - upgrade behavior could get conflated with install or catalog refresh — resolved: advancing to a newer resolved version uses a dedicated `upgrade` command
 - upgrade scope could be unclear by default — resolved: bare `upgrade` attempts to advance the entire manifest
-- upgrade selection could be under-specified — resolved: `upgrade` advances to the latest stable published version still allowed by trust and age rules
-- blocked newer versions could blur together with normal success output — resolved: policy-blocked upgrade candidates do not alter the default short summary, but are reported in more verbose output and logs
+- upgrade selection could be under-specified — resolved: `upgrade` advances `git:` targets to the latest stable published Source Version allowed by trust and age rules, while `file:` targets record a new snapshot hash from the current local path
+- skipped version detail could overwhelm normal success output — resolved: routine skipped versions are omitted from v1 diagnostics
 - upgrade target syntax could drift away from install syntax — resolved: `upgrade` reuses the same unambiguous target forms as `install`, with source targets upgrading a whole source and artifact targets upgrading only that artifact
 - upgrade could silently become install for undeclared targets — resolved: `upgrade` rejects targets not already declared in the **Manifest**
 - whole-source declarations could be undermined by artifact-level upgrades — resolved: when a source is declared as a whole, `upgrade` rejects narrower artifact-level targets inside that source
@@ -561,14 +521,8 @@ This section preserves the current specification interview state by explicit use
     - catalog-qualified source installs and direct source installs share the same whole-source semantics
     - **Search Command** returns sources as the primary result unit, with artifact detail controlled by flags
     - each configured catalog has a unique local name, and conflicting local names make **Catalog Add** fail explicitly
-    - successful install and sync operations show a short **Operation Summary** by default, with deeper follow-up inspection via **Logs Command** and **Operation ID**
-    - recorded operation history is retained locally for at most 100 operations and one week
-    - **Logs Command** sorts operations by descending date by default, with flags for alternate ordering
-    - the canonical command name is lowercase `logs`, and inspecting an operation defaults to its original verbosity level
-    - logs are scoped by an **Operation Root**, and bare `logs` replays the most recent operation while `logs ls|list` lists history
-    - each operation root is stored under a stable **Operation Root Key** derived from the normalized root path, with readable path metadata preserved
-    - v1 defines exactly three verbosity levels: `summary`, `normal`, and `verbose`
-    - verbosity is selected canonically with `--verbosity`, with optional shorthand aliases such as `-v` and `-vv`
+    - install, Sync, and upgrade show one immediate **Operation Summary** followed only by effective or planned changes
+    - v1 has no persisted operation logs, replay, operation identifiers, retention, or verbosity levels
     - `catalog add <catalog-reference> --name <local-name>` is the canonical add form, with default-name fallback only when non-conflicting
     - `catalog list` default output is `local-name`, `catalog-reference`, `cache-status`, `last-refresh`, and `last-refresh-result`
     - `catalog refresh` without arguments refreshes all configured catalogs
@@ -586,16 +540,14 @@ This section preserves the current specification interview state by explicit use
     - omitting `--artifact` installs the whole **Source**, while `--artifact` selects one **Artifact** inside that source
     - explicit upgrades use one canonical shape: `tbboot upgrade <source-ref> [--artifact <artifact-name>]`
     - omitting `--artifact` upgrades the declared whole **Source**, while `--artifact` narrows the explicit source target to one declared **Artifact**
-    - `upgrade` remains the canonical version-advancement command, and `install --upgrade` is a shortcut for the same upgrade behavior on the selected install target
+    - `upgrade` is the only v1 version-advancement command; `install --upgrade` is not supported
     - canonical v1 command shapes outside install and upgrade are:
       - `tbboot search <query>`
       - `tbboot catalog add <catalog-reference> [--name <local-name>]`
       - `tbboot catalog list`
       - `tbboot catalog refresh [<local-name>...]`
       - `tbboot catalog remove <local-name>`
-      - `tbboot logs [<operation-id>]`
-      - `tbboot logs list`
-    - default human-facing output uses one short stable shape, with extra detail available only through `--verbosity` or `logs`
+    - default human-facing output uses one short stable shape with no verbosity controls
   - Still open:
     - none for v1
 
@@ -612,8 +564,9 @@ This section preserves the current specification interview state by explicit use
     - moving to a newer resolved version uses a dedicated `upgrade` command
     - bare `upgrade` targets the entire manifest by default
     - explicit `upgrade` accepts only one target in v1
-    - `upgrade` advances to the latest stable published version allowed by policy by default
-    - source targets upgrade a whole source, while artifact targets upgrade only the selected artifact
+    - `upgrade` advances `git:` targets to the latest stable published Source Version allowed by policy
+    - `upgrade` re-reads each targeted `file:` Source from its current local path and records the resulting snapshot hash; an unchanged snapshot is a no-op
+    - Source targets upgrade every declared Artifact in the Source snapshot, while Artifact targets upgrade only the selected Artifact and leave sibling Artifacts on their existing snapshots
     - `upgrade` rejects targets that are not already declared in the **Manifest**
     - artifact-level upgrade is rejected when the manifest declares that source as a whole
     - `upgrade` can preview selected version moves through **Dry Run** without mutating state
@@ -622,7 +575,7 @@ This section preserves the current specification interview state by explicit use
     - first successful `install` creates the **Lockfile** when only a **Manifest** exists
     - the **Manifest** stores enough source identity to re-resolve stably if the **Lockfile** is lost or regenerated
     - only stable source identity is normative in the **Manifest**; original user-facing references are optional metadata only
-    - v1 adds no extra version-selection controls beyond direct-install `--source-version` and default upgrade-to-latest-stable-allowed behavior
+    - v1 adds no extra version-selection controls beyond direct-install `--source-version`; `git:` upgrade selects the latest stable published Source Version allowed by policy, while `file:` upgrade records a fresh local snapshot hash
   - Still open:
     - none for v1
 
@@ -673,7 +626,7 @@ This section preserves the current specification interview state by explicit use
     - v1 exit codes are `0` success, `1` operational or validation error, `2` user-action conflict, and `3` trust or policy denial
     - required prompts fail with exit code `2` in non-interactive execution or JSON output
     - whole-file drift prompts before update or removal
-    - policy-blocked upgrade candidates do not change exit code `0` and are reported only in verbose output or logs
+    - routine skipped-version detail is omitted from v1 diagnostics
     - bare `upgrade` stops at the first mutating failure after processing targets in deterministic order
   - Still open:
     - none for v1
@@ -684,12 +637,12 @@ This section preserves the current specification interview state by explicit use
 
 ### Session checkpoint
 
-- This interview closed a large first-pass v1 model for install, catalog management, trust policy, logs, lockfile/bootstrap, and upgrade semantics.
+- This interview closed a large first-pass v1 model for install, catalog management, trust policy, lockfile/bootstrap, and upgrade semantics.
 - The next session should avoid reopening resolved glossary decisions unless a contradiction appears in code or examples.
 - The highest-value continuation is to turn the remaining open items into concrete command examples and output samples.
 
 ### Deferred future topics
 
-- interactive terminal mode for browsing catalogs, searching sources, and inspecting logs without composing full commands
+- interactive terminal mode for browsing catalogs and searching sources without composing full commands
 - additional source types beyond `file` and `git`
 - richer version selection controls such as ranges or upgrade policies beyond "latest stable allowed"

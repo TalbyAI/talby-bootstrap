@@ -14,7 +14,7 @@ The canonical executable is `tbboot`.
 
 V1 has two user-facing surfaces:
 
-- **Artifact Management Surface** centered on `install`, `upgrade`, `search`, and `logs`.
+- **Artifact Management Surface** centered on `install`, `upgrade`, and `search`.
 - **Catalog Management Surface** centered on `catalog add`, `catalog list`, `catalog refresh`, and `catalog remove`.
 
 `tbboot install` without arguments runs **Sync**. `tbboot install <target>` declares and applies one explicit target. V1 accepts only one explicit install target per command.
