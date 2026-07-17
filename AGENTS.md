@@ -42,6 +42,8 @@ Go code should keep package boundaries shallow and explicit. Follow these conven
 
 Run `just check` before submitting changes. For documentation-only changes, `just check-md` is enough. For Go changes, run `just check-go` at minimum.
 
+When validating a pull request branch, check both pending tracked changes and the committed PR range. Run `git diff --check HEAD` for pending tracked changes and `git diff --check <base>...HEAD` for committed PR changes, replacing `<base>` with the pull request's actual base branch.
+
 For CLI changes, test exit codes and stdout/stderr behavior, including JSON mode when applicable. For `internal/` packages, prefer table-free, focused tests that cover both unit seams with fakes and at least one real-path integration-style case when local file resolution or descriptor parsing is central to the behavior.
 
 ## Commit & Pull Request Guidelines
@@ -75,6 +77,8 @@ Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `won
 ### Domain docs
 
 This is a single-context repository with `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
+When removing or replacing a documented product contract, search every canonical document in scope for specific obsolete claims. Avoid broad single-term searches when valid negations use the same terms.
 
 ### Grilling interviews
 
