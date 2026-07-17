@@ -75,3 +75,33 @@ Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `won
 ### Domain docs
 
 This is a single-context repository with `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
+### Grilling interviews
+
+In this repository, when `/grilling` runs directly or through another skill,
+these repository-local rules override its one-question-at-a-time instruction.
+
+- Ask questions in numbered batches of 5 to 10. Default to 7.
+- Include the recommended answer or default beside every question.
+- Only group questions that can be answered from the currently known context.
+Do not ask downstream questions whose meaning depends on an unresolved answer.
+- Find repository facts yourself. Ask the user for decisions, preferences, and
+information that cannot be discovered locally.
+- The user may answer all, some, or none of the questions.
+- After each response:
+
+1. Record the decisions the user resolved.
+2. Answer any requests for explanation or additional detail.
+3. Keep unanswered decisions open; never accept a recommendation silently.
+4. Reword questions that were unclear.
+5. Add newly unblocked questions until the next batch contains 5 to 10
+    questions.
+
+- When fewer than 5 meaningful questions remain, ask only those remaining.
+Never invent filler questions to reach the batch minimum.
+- If the user explicitly accepts a recommendation, treat that question as
+resolved.
+- Continue until no material decisions remain, then present the resulting
+shared understanding for confirmation.
+- Do not plan or implement the result until the user confirms that shared
+understanding.
