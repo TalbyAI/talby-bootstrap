@@ -144,6 +144,10 @@ _Avoid_: Message parsing, ad hoc status
 The canonical executable name used to invoke Talby Bootstrap from the command line. The initial command name is `tbboot`.
 _Avoid_: talby, tboot
 
+**Distribution Package**:
+A platform-specific archive that distributes the `tbboot` executable. It is release material for the CLI, not an **Artifact** managed by the CLI.
+_Avoid_: Release artifact, binary artifact
+
 **Artifact Management Surface**:
 The user-facing command surface for declaring, reconciling, and materializing **Artifacts** in a target repository or folder.
 _Avoid_: Sync API, artifact internals
