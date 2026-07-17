@@ -56,7 +56,7 @@ Do not commit local secrets, keys, `.env` files, or generated local state. `.git
 
 ## Agent-Specific Instructions
 
-Agents should use the `caveman` skill by default for responses unless the user explicitly asks for normal verbosity or a task requires fuller explanation.
+Agents should use the `caveman` skill in `lite` mode by default for responses unless the user explicitly asks for normal verbosity or a task requires fuller explanation.
 
 During brainstorming, a request for context, implications, examples, or trade-offs does not answer the current question. Answer the clarification, then restate the same question and wait for an explicit decision. Do not advance to another design question while the current one remains unanswered.
 
