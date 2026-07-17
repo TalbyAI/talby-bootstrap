@@ -78,8 +78,9 @@ This is a single-context repository with `CONTEXT.md` and `docs/adr/`. See `docs
 
 ### Grilling interviews
 
-In this repository, when `/grilling` runs directly or through another skill,
-these repository-local rules override its one-question-at-a-time instruction.
+In this repository, when `/grilling` or `$superpowers:brainstorming` runs
+directly or through another skill, these repository-local rules override their
+one-question-at-a-time instructions.
 
 - Ask questions in numbered batches of 5 to 10. Default to 7.
 - Include the recommended answer or default beside every question.
