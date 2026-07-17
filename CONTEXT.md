@@ -237,7 +237,7 @@ The category of a **Materialization Step** that defines how that step is interpr
 _Avoid_: Artifact kind, source type
 
 **Removal Policy**:
-The rule that determines how **Sync** handles a **Managed Artifact** that is no longer present in the final resolved desired state. Removal is decided per managed artifact after full resolution, not by the prior textual shape of the **Manifest** declaration.
+The rule that determines how **Sync** handles a **Managed Artifact** that is no longer present in the final desired state resolved from the complete **Manifest**. V1 authorizes removal only through `--prune` on the targetless **Install Command**, never from a targeted install subset.
 _Avoid_: Garbage collection, overwrite policy
 
 **Materialization Record**:
@@ -253,8 +253,12 @@ The explicit conflict state where two **Managed Artifacts** would claim the same
 _Avoid_: Shared ownership, last-write-wins
 
 **Recovery State**:
-The explicit failure state recorded when a materialization operation stops after partial writes and the CLI cannot fully restore the prior state with certainty.
+The explicit failure state recorded atomically when verified best-effort rollback cannot restore every affected path to its prior observed state. It blocks later mutation of the same consumer repository until manual repair is verified; **Dry Run** may report it but never clears it.
 _Avoid_: Silent partial failure, implicit dirty state
+
+**Recovery State Filename**:
+The canonical filename used to store **Recovery State** at the consumer repository root. The initial filename is `talby-artifacts.recovery.yaml`.
+_Avoid_: Recovery log, temporary backup filename
 
 **Fragment**:
 A bounded section inserted by an **Artifact** inside an existing file instead of creating or replacing the whole file.
@@ -269,7 +273,7 @@ The state where the content inside a managed **Fragment** no longer matches what
 _Avoid_: Expected update, normal sync
 
 **Whole-File Drift**:
-The state where a whole file owned by a **Managed Artifact** no longer matches the prior **Materialization Record**.
+The state where a whole file owned by a **Managed Artifact**, or its required parent topology, no longer matches the prior **Materialization Record**. Changed content, absence, symlinks, and non-regular entries are drift; permission-only differences are not.
 _Avoid_: Expected update, normal sync
 
 ## Relationships
@@ -361,14 +365,17 @@ _Avoid_: Expected update, normal sync
 - A managed change is reported to the user with a **Provenance Summary**
 - An **Ownership Conflict** exists when two **Managed Artifacts** would claim the same whole file or overlapping fragment region
 - A failed materialization may enter **Recovery State** when verified rollback is incomplete
+- **Recovery State** has exactly one canonical **Recovery State Filename**
+- **Recovery State** stores canonical root-relative paths and sanitized failure metadata, not prior file contents or raw errors
+- **Recovery State** blocks every mutating operation against the same consumer repository until its recorded prior observations are verified
 - A **Fragment** is delimited by exactly two **Fragment Boundaries**
 - Each **Fragment Boundary** identifies its owning artifact and fragment name
 - Visible **Fragment Boundaries** are the default mechanism for managed fragment insertion
 - **Fragment Drift** is detected by comparing the current fragment contents against the prior **Materialization Record**
 - **Whole-File Drift** is detected by comparing the current whole-file contents against the prior **Materialization Record**
 - The default reaction to **Fragment Drift** is to prompt before updating or removing the fragment
-- The default reaction to **Whole-File Drift** is to prompt before updating or removing the whole file
-- The default **Removal Policy** is to prompt before removing a **Managed Artifact** no longer declared in the **Manifest**
+- **Whole-File Drift** is accumulated during preflight and blocks the entire mutation with a user-action conflict
+- The default **Removal Policy** reports removal-required conflicts; `--prune` authorizes removal only from the complete Manifest-resolved desired state
 - A whole file already owned by the same **Managed Artifact** may be overwritten automatically when it still matches the prior **Materialization Record**
 
 ## Canonical examples
