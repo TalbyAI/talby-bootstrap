@@ -165,7 +165,7 @@ The primary user-facing command for artifact management. The canonical command i
 _Avoid_: sync command, add command
 
 **Upgrade Command**:
-The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With one explicit target, it accepts the same unambiguous source forms as `install`, optionally narrowed with `--artifact`. V1 does not accept multiple explicit upgrade targets in a single command. Source targets upgrade the whole declared source; `--artifact` upgrades only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. Bare `upgrade` applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. By default it advances each eligible target to the latest stable published version allowed by the active trust policy. The canonical command name is `upgrade`.
+The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With one explicit target, it accepts the same unambiguous source forms as `install`, optionally narrowed with `--artifact`. V1 does not accept multiple explicit upgrade targets in a single command. Source targets upgrade the whole declared source; `--artifact` upgrades only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. Bare `upgrade` applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. For `git:` targets, upgrade advances to the latest stable published Source Version allowed by the active trust policy. For `file:` targets, upgrade re-reads the current local path and records the resulting snapshot hash; an unchanged snapshot is a no-op. These rules apply to both bare and explicit upgrade: Source scope updates every declared Artifact in the Source snapshot, while Artifact scope updates only the selected Artifact and leaves sibling Artifacts on their existing snapshots. The canonical command name is `upgrade`.
 _Avoid_: Sync alias, catalog refresh
 
 **Operation Summary**:
@@ -479,7 +479,7 @@ _Avoid_: Expected update, normal sync
 - the underlying **Sync** operation could be mistaken for a top-level CLI command — resolved: users trigger reconciliation through bare `install`, while **Sync** remains the underlying operation name
 - upgrade behavior could get conflated with install or catalog refresh — resolved: advancing to a newer resolved version uses a dedicated `upgrade` command
 - upgrade scope could be unclear by default — resolved: bare `upgrade` attempts to advance the entire manifest
-- upgrade selection could be under-specified — resolved: `upgrade` advances to the latest stable published version still allowed by trust and age rules
+- upgrade selection could be under-specified — resolved: `upgrade` advances `git:` targets to the latest stable published Source Version allowed by trust and age rules, while `file:` targets record a new snapshot hash from the current local path
 - skipped version detail could overwhelm normal success output — resolved: routine skipped versions are omitted from v1 diagnostics
 - upgrade target syntax could drift away from install syntax — resolved: `upgrade` reuses the same unambiguous target forms as `install`, with source targets upgrading a whole source and artifact targets upgrading only that artifact
 - upgrade could silently become install for undeclared targets — resolved: `upgrade` rejects targets not already declared in the **Manifest**
@@ -540,7 +540,7 @@ This section preserves the current specification interview state by explicit use
     - omitting `--artifact` installs the whole **Source**, while `--artifact` selects one **Artifact** inside that source
     - explicit upgrades use one canonical shape: `tbboot upgrade <source-ref> [--artifact <artifact-name>]`
     - omitting `--artifact` upgrades the declared whole **Source**, while `--artifact` narrows the explicit source target to one declared **Artifact**
-    - `upgrade` remains the canonical version-advancement command, and `install --upgrade` is a shortcut for the same upgrade behavior on the selected install target
+    - `upgrade` is the only v1 version-advancement command; `install --upgrade` is not supported
     - canonical v1 command shapes outside install and upgrade are:
       - `tbboot search <query>`
       - `tbboot catalog add <catalog-reference> [--name <local-name>]`
@@ -564,8 +564,9 @@ This section preserves the current specification interview state by explicit use
     - moving to a newer resolved version uses a dedicated `upgrade` command
     - bare `upgrade` targets the entire manifest by default
     - explicit `upgrade` accepts only one target in v1
-    - `upgrade` advances to the latest stable published version allowed by policy by default
-    - source targets upgrade a whole source, while artifact targets upgrade only the selected artifact
+    - `upgrade` advances `git:` targets to the latest stable published Source Version allowed by policy
+    - `upgrade` re-reads each targeted `file:` Source from its current local path and records the resulting snapshot hash; an unchanged snapshot is a no-op
+    - Source targets upgrade every declared Artifact in the Source snapshot, while Artifact targets upgrade only the selected Artifact and leave sibling Artifacts on their existing snapshots
     - `upgrade` rejects targets that are not already declared in the **Manifest**
     - artifact-level upgrade is rejected when the manifest declares that source as a whole
     - `upgrade` can preview selected version moves through **Dry Run** without mutating state

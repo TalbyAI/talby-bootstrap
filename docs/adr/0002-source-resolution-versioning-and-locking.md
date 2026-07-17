@@ -21,7 +21,7 @@ Direct install version pinning applies to **Source Version** only. If no source 
 - `git` resolves to the latest stable published **Source Version** allowed by policy for that acquired **Source Identity**.
 - `file` records a local snapshot hash in the **Lockfile** for that acquired **Source Identity**.
 
-Later syncs keep the previously resolved **Source Version** until the user explicitly upgrades. `upgrade` advances already-declared sources or artifacts to the latest stable version allowed by policy and writes the new exact version to the **Lockfile**.
+Later syncs keep the previously resolved **Source Version** until the user explicitly upgrades. For `git:` targets, `upgrade` advances already-declared Sources or Artifacts to the latest stable published **Source Version** allowed by policy. For `file:` targets, it re-reads the current local path and records the resulting snapshot hash; an unchanged snapshot is a no-op. Source scope updates every declared Artifact in the Source snapshot, while Artifact scope updates only the selected Artifact and leaves sibling Artifacts on their existing snapshots. Successful upgrade writes only the affected exact resolutions to the **Lockfile** and leaves the **Manifest** unchanged.
 
 ## Consequences
 
