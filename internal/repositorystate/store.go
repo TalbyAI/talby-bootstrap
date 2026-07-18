@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 const (
@@ -125,10 +124,6 @@ func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) 
 		}
 		return Manifest{}, err
 	}
-	if strings.TrimSpace(string(bytes)) == "" {
-		return Manifest{}, StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("file is empty")}
-	}
-
 	var doc manifestDocument
 	if err := decodeStrictYAML(bytes, &doc); err != nil {
 		return Manifest{}, StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: err}
@@ -215,10 +210,6 @@ func (fileStore) LoadLockfile(_ context.Context, root string) (Lockfile, error) 
 		}
 		return Lockfile{}, err
 	}
-	if strings.TrimSpace(string(bytes)) == "" {
-		return Lockfile{}, StateFileError{File: StateFileLockfile, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("file is empty")}
-	}
-
 	var doc lockfileDocument
 	if err := decodeStrictYAML(bytes, &doc); err != nil {
 		return Lockfile{}, StateFileError{File: StateFileLockfile, Kind: StateFileErrorInvalidFormat, Err: err}
@@ -296,10 +287,6 @@ func (fileStore) LoadMaterializationRecord(_ context.Context, root string) (Mate
 		}
 		return MaterializationRecord{}, err
 	}
-	if strings.TrimSpace(string(bytes)) == "" {
-		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("file is empty")}
-	}
-
 	var doc materializationRecordDocument
 	if err := decodeStrictYAML(bytes, &doc); err != nil {
 		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: err}

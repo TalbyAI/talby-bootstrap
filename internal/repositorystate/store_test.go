@@ -102,21 +102,6 @@ func TestStoreSortsLockfileArtifacts(t *testing.T) {
 	}
 }
 
-func TestStoreDoesNotPersistDeprecatedManifestInput(t *testing.T) {
-	root := t.TempDir()
-	manifest := Manifest{Declarations: []Declaration{{Source: SourceIdentity{Type: SourceTypeFile, Locator: "./source"}, Target: DeclarationTarget{Scope: DeclarationScopeSource}, Input: &SourceInput{Locator: "legacy"}}}}
-	if err := NewStore().WriteManifest(context.Background(), root, manifest); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(root, ManifestFileName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "input:") || strings.Contains(string(data), "target:") {
-		t.Fatalf("manifest contains deprecated fields: %s", data)
-	}
-}
-
 func TestStoreRoundTripsRecoveryState(t *testing.T) {
 	root := t.TempDir()
 	state := RecoveryState{Code: RecoveryCodeRollbackIncomplete, Summary: "rollback incomplete", Observations: []RecoveryObservation{{Path: "file", Result: RecoveryResultRestoreFailed, ExpectedState: RecoveryExpectedAbsent}}}

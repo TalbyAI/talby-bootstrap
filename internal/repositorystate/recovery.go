@@ -1,6 +1,7 @@
 package repositorystate
 
 import (
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -75,13 +76,11 @@ func validateRecoveryOwner(root string, owner RecoveryOwner) error {
 }
 
 func isSHA256Digest(value string) bool {
-	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(value, prefix) || len(value) != len(prefix)+64 {
 		return false
 	}
-	for _, r := range value[len("sha256:"):] {
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
-			return false
-		}
-	}
-	return true
+	digest := value[len(prefix):]
+	decoded, err := hex.DecodeString(digest)
+	return err == nil && hex.EncodeToString(decoded) == digest
 }

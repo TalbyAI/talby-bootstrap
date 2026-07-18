@@ -16,7 +16,7 @@ func ParseSourceReference(raw string) (SourceIdentity, error) {
 	if typeName != SourceTypeFile && typeName != SourceTypeGit {
 		return SourceIdentity{}, fmt.Errorf("unsupported source type %q", typeName)
 	}
-	if strings.TrimSpace(locator) != locator || strings.ContainsFunc(locator, unicode.IsSpace) {
+	if strings.ContainsFunc(locator, unicode.IsSpace) {
 		return SourceIdentity{}, fmt.Errorf("source reference locator must not contain whitespace")
 	}
 	return SourceIdentity{Type: typeName, Locator: locator}, nil
@@ -34,7 +34,7 @@ func NormalizeSourceIdentity(root string, source SourceIdentity) (SourceIdentity
 		return SourceIdentity{}, fmt.Errorf("source locator is required")
 	}
 	if source.Type == SourceTypeGit {
-		if strings.TrimSpace(source.Locator) != source.Locator || strings.ContainsFunc(source.Locator, unicode.IsSpace) {
+		if strings.ContainsFunc(source.Locator, unicode.IsSpace) {
 			return SourceIdentity{}, fmt.Errorf("source locator must not contain whitespace")
 		}
 		return source, nil

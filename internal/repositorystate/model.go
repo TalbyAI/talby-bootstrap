@@ -11,7 +11,6 @@ type Declaration struct {
 	Source        SourceIdentity
 	Target        DeclarationTarget
 	SourceVersion string
-	Input         *SourceInput
 }
 type DeclarationTarget struct {
 	Scope    DeclarationScope
@@ -38,7 +37,6 @@ const (
 	SourceTypeGit  = "git"
 )
 
-type SourceInput struct{ Locator string }
 type ArtifactKey struct {
 	Source SourceIdentity
 	Name   string

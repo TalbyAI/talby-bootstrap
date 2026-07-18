@@ -140,17 +140,6 @@ func normalizeExampleArgs(argv []string, workspace string) ([]string, error) {
 	return args, nil
 }
 
-func exampleUsesFileSource(commands []examples.Command) bool {
-	for _, command := range commands {
-		for _, arg := range command.Argv {
-			if strings.HasPrefix(arg, "file:") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func TestStageExampleWithoutSource(t *testing.T) {
 	exampleRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(exampleRoot, "consumer"), 0o755); err != nil {
