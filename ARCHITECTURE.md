@@ -1,6 +1,12 @@
 # Talby Bootstrap Architecture
 
-This document is the entry point for Talby Bootstrap v1 architecture. `CONTEXT.md` is the closed domain source for v1; this file indexes the architectural decisions that turn that language into implementation constraints.
+This document is the entry point for the Talby Bootstrap 0.1 architecture. `CONTEXT.md` is the product contract; this file indexes the architectural decisions that turn that language into implementation constraints.
+
+## Product 0.1 boundary
+
+The 0.1 implementation publishes six strict schema-version-1 YAML documents with canonical `tbboot-` filenames. Consumer-facing and persisted Source References are scalar `file:<locator>` or `git:<locator>` values. The implemented acquisition path is an in-root `file:` Source with whole-file `file` materialization steps.
+
+Git identity storage is present for the contract, but Git acquisition is deferred. Catalogs, search, upgrade, executable or prompt-driven steps, fragment/template rendering, durable rollback lifecycle, and persisted operation logs are outside 0.1 and must not be represented as successful CLI behavior.
 
 ## Architecture shape
 
@@ -8,11 +14,11 @@ Talby Bootstrap is a CLI named `tbboot` that reconciles reusable repository arti
 
 The architecture is organized around five stable responsibilities:
 
-- **Command surface**: parses artifact, catalog, search, and upgrade commands into explicit user intent.
+- **Command surface**: parses the implemented `install` command into explicit user intent; later command surfaces remain separate tickets.
 - **Resolution**: turns a **Manifest** and install target into an exact **Resolution** recorded in a **Lockfile**.
-- **Trust policy**: rejects unapproved sources, immature versions, and risky materialization steps before writes happen.
-- **Materialization**: applies declared **Materialization Steps**, tracks ownership, detects drift, and records recovery state when rollback cannot be verified.
-- **Operation reporting**: emits short human summaries, machine-readable JSON, and exit codes.
+- **Trust policy**: applies the current file-source boundary before writes happen; broader source and step policy is deferred.
+- **Materialization**: applies whole-file `file` steps and tracks the existing ownership record.
+- **Operation reporting**: emits the current human and machine-readable install results.
 
 ## Decision index
 
@@ -25,14 +31,15 @@ The architecture is organized around five stable responsibilities:
 ## Non-functional requirements
 
 - Reproducibility: resolved versions are recorded in a versioned **Lockfile**.
-- Safety: remote sources and risky step types are denied until explicitly approved.
+- Safety: the current install path is limited to in-root local Sources and whole-file steps.
 - Auditability: managed changes report provenance in immediate operation output.
-- Predictability: ambiguous install targets fail instead of using precedence rules.
-- Minimal v1 scope: only `file` and `git` source types are supported, and YAML is the only manifest format.
+- Predictability: scalar Source References and strict YAML fail before mutation when invalid.
+- Minimal 0.1 scope: YAML is the only manifest format; only the in-root `file:` path is acquired.
 
-## Out of scope for v1
+## Deferred beyond 0.1
 
-- Interactive catalog browsing.
-- Source types beyond `file` and `git`.
-- Rich version constraints or upgrade policies beyond latest stable allowed.
-- Source or materialization caches beyond catalog metadata.
+- Git acquisition and other Source Types.
+- Catalog browsing, search, upgrade, and catalog maintenance commands.
+- Fragment, template, script, and prompt materialization.
+- Full filesystem race protection, operation locking, prune, and rollback lifecycle.
+- Rich version constraints, source/materialization caches, and persisted operation logs.

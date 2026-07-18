@@ -1,2 +1,2 @@
 install: applied 1 changes (1 artifacts)
-declaration_added file:.tbboot-example/sources/local-example-source
+declaration_added file:./.tbboot-example/sources/local-example-source

@@ -1,22 +1,24 @@
 # Ubiquitous Language
 
-`CONTEXT.md` is the source of truth for Talby Bootstrap v1 domain language. This document is the compact glossary used by architecture, ADRs, and implementation work.
+`CONTEXT.md` is the source of truth for the Talby Bootstrap 0.1 product contract. This document is the compact glossary used by architecture, ADRs, and implementation work.
+
+In 0.1, the active materialization step type is whole-file `file`, the active acquired Source path is in-root `file:`, and the CLI surface is `install`. `git:` references are stored as contract data but not acquired yet. Catalog, search, upgrade, fragment, template, script, and prompt terms describe deferred capabilities rather than implemented 0.1 behavior.
 
 ## Artifact publication
 
-| Term                          | Definition                                                                                                         | Aliases to avoid                       |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
-| **Artifact**                  | The canonical installable unit resolved from a source and materialized into a target repository or folder.         | Pattern, snippet, module               |
-| **Artifact Name**             | The source-local identifier for an **Artifact**.                                                                   | Global ID, path                        |
-| **Artifact Descriptor**       | The manifest published by an **Artifact** that declares version, metadata, and materialization steps.              | Inline metadata, inferred manifest     |
-| **Materialization Step**      | One declared action in an **Artifact Descriptor** that writes, updates, renders, or executes installation content. | Artifact type, hidden install behavior |
-| **Materialization Step Type** | The category of a **Materialization Step**: `file`, `fragment`, `template`, `script`, or `prompt` in v1.           | Artifact kind, source type             |
+| Term | Definition | Aliases to avoid |
+| --- | --- | --- |
+| **Artifact** | The canonical installable unit resolved from a source and materialized into a target repository or folder. | Pattern, snippet, module |
+| **Artifact Name** | The source-local identifier for an **Artifact**. | Global ID, path |
+| **Artifact Descriptor** | The manifest published by an **Artifact** that declares version, metadata, and materialization steps. | Inline metadata, inferred manifest |
+| **Materialization Step** | One declared action in an **Artifact Descriptor** that writes, updates, renders, or executes installation content. | Artifact type, hidden install behavior |
+| **Materialization Step Type** | The category of a **Materialization Step**. Product 0.1 accepts only whole-file `file`; fragment, template, script, and prompt are deferred. | Artifact kind, source type |
 
 ## Source and discovery
 
 - **Source**: A published origin that defines and can deliver one or more **Artifacts**.
   Avoid: Catalog
-- **Acquisition Channel**: The consumer-side mechanism used to obtain a **Source** for resolution, trust, and locking; v1 supports `file` and `git`.
+- **Acquisition Channel**: The consumer-side mechanism used to obtain a **Source** for resolution, trust, and locking; 0.1 acquires only in-root `file:`, while `git:` identity storage is reserved for a later acquisition ticket.
   Avoid: Published transport, source kind
 - **Source Type**: The explicit classification of an **Acquisition Channel** used in references, manifests, and lockfiles.
   Avoid: Inferred protocol, published source kind
@@ -41,7 +43,7 @@
 
 ## Policy and safety
 
-- **Trust Policy**: The versioned security policy controlling approved **Source Identity** values, step types, and age constraints.
+- **Trust Policy**: The versioned security policy controlling approved **Source Identity** values; broader step-type and age constraints are deferred beyond 0.1.
   Avoid: Machine default, ad hoc flag
 - **Minimum Age Rule**: A trust constraint rejecting resolved targets that are newer than the configured age threshold.
   Avoid: Source age, catalog age
@@ -56,15 +58,15 @@
 
 ## Command and reporting
 
-| Term                  | Definition                                                                                                                               | Aliases to avoid                           |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **CLI Command Name**  | The executable name `tbboot`.                                                                                                            | talby, tboot                               |
-| **Install Command**   | The primary command for declaring, reconciling, and materializing artifacts.                                                             | sync command, add command                  |
-| **Sync**              | The reconciliation operation that aligns actual state with the **Manifest** and the recorded **Lockfile** / derived **Resolution**.      | Top-level command, apply-only command      |
-| **Upgrade Command**   | The command that advances already-declared artifacts or sources to newer resolved versions.                                              | Sync alias, catalog refresh                |
-| **Search Command**    | The command that queries configured catalog caches and returns matching **Sources**.                                                     | catalog admin command, repository search   |
-| **Operation Summary** | The default concise human-readable output after install, Sync, or upgrade, followed only by effective or planned changes.                | Full diagnostic dump, success-only silence |
-| **Exit Code**         | The process result code classifying command outcome for shells, CI, and automation.                                                      | Message parsing, ad hoc status             |
+| Term | Definition | Aliases to avoid |
+| --- | --- | --- |
+| **CLI Command Name** | The executable name `tbboot`. | talby, tboot |
+| **Install Command** | The primary command for declaring, reconciling, and materializing artifacts. | sync command, add command |
+| **Sync** | The reconciliation operation that aligns actual state with the **Manifest** and the recorded **Lockfile** / derived **Resolution**. | Top-level command, apply-only command |
+| **Upgrade Command** | A deferred command intended to advance already-declared artifacts or sources to newer resolved versions. | Sync alias, catalog refresh |
+| **Search Command** | A deferred command intended to query configured catalog caches and return matching **Sources**. | catalog admin command, repository search |
+| **Operation Summary** | The default concise human-readable output after install or Sync, followed only by effective changes. | Full diagnostic dump, success-only silence |
+| **Exit Code** | The process result code classifying command outcome for shells, CI, and automation. | Message parsing, ad hoc status |
 
 ## Relationships
 
@@ -96,7 +98,7 @@
 >
 > **Dev:** "Can sync remove files silently if an artifact disappears?"
 >
-> **Domain expert:** "No. The **Removal Policy** prompts before removing a **Managed Artifact** by default, and drift is checked through the **Materialization Record**."
+> **Domain expert:** "In 0.1, removal and prune are deferred; whole-file drift is checked through the **Materialization Record**."
 
 ## Flagged ambiguities
 

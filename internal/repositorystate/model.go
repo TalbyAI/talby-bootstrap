@@ -1,14 +1,17 @@
 package repositorystate
 
+import "encoding/json"
+
 type Manifest struct {
 	TrustPolicy  TrustPolicy
 	Declarations []Declaration
 }
 type TrustPolicy struct{ ApprovedSources []SourceIdentity }
 type Declaration struct {
-	Source SourceIdentity
-	Target DeclarationTarget
-	Input  *SourceInput
+	Source        SourceIdentity
+	Target        DeclarationTarget
+	SourceVersion string
+	Input         *SourceInput
 }
 type DeclarationTarget struct {
 	Scope    DeclarationScope
@@ -26,7 +29,14 @@ type SourceIdentity struct {
 	Locator string `yaml:"locator" json:"locator"`
 }
 
-const SourceTypeFile = "file"
+func (source SourceIdentity) MarshalJSON() ([]byte, error) {
+	return json.Marshal(FormatSourceReference(source))
+}
+
+const (
+	SourceTypeFile = "file"
+	SourceTypeGit  = "git"
+)
 
 type SourceInput struct{ Locator string }
 type ArtifactKey struct {
@@ -41,6 +51,7 @@ type Lockfile struct{ Resolutions []Resolution }
 type Resolution struct {
 	Source          SourceIdentity
 	ResolvedVersion string
+	Commit          string
 	Artifacts       []ArtifactResolution
 }
 type ArtifactResolution struct {
@@ -51,6 +62,7 @@ type MaterializationRecord struct{ Artifacts []ManagedArtifactRecord }
 type ManagedArtifactRecord struct {
 	Source          SourceIdentity
 	ResolvedVersion string
+	Commit          string
 	Artifact        string
 	ArtifactVersion string
 	Files           []ManagedFileRecord
@@ -58,6 +70,27 @@ type ManagedArtifactRecord struct {
 type ManagedFileRecord struct {
 	Path   string
 	Digest string
+}
+
+type RecoveryState struct {
+	Code         string
+	Summary      string
+	Observations []RecoveryObservation
+}
+
+type RecoveryObservation struct {
+	Path          string
+	Result        string
+	ExpectedState string
+	Digest        string
+	Mode          uint32
+	Owner         *RecoveryOwner
+}
+
+type RecoveryOwner struct {
+	Source          SourceIdentity
+	ResolvedVersion string
+	Artifact        string
 }
 type ChangeKind string
 
@@ -73,6 +106,7 @@ const (
 	StateFileManifest              StateFile = "manifest"
 	StateFileLockfile              StateFile = "lockfile"
 	StateFileMaterializationRecord StateFile = "materialization_record"
+	StateFileRecovery              StateFile = "recovery"
 )
 
 type StateFileErrorKind string

@@ -20,8 +20,8 @@ func write(t *testing.T, path, content string) {
 }
 func fixture(t *testing.T) string {
 	root := t.TempDir()
-	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts:\n  - name: a\n    path: a\n")
-	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    path: out\n    source: in\n")
+	write(t, filepath.Join(root, "tbboot-source.yaml"), "schema_version: 1\nartifacts:\n  - name: a\n    path: a\n")
+	write(t, filepath.Join(root, "a", "tbboot-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\nsteps:\n  - type: file\n    path: out\n    source: in\n")
 	write(t, filepath.Join(root, "a", "in"), "captured\n")
 	return root
 }
@@ -46,7 +46,7 @@ func TestResolveCapturesFileBytesAndEveryInputPath(t *testing.T) {
 }
 func TestResolveFramesSnapshotPayloads(t *testing.T) {
 	root := fixture(t)
-	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    path: a\n    source: one\n  - type: file\n    path: b\n    source: two\n")
+	write(t, filepath.Join(root, "a", "tbboot-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\nsteps:\n  - type: file\n    path: a\n    source: one\n  - type: file\n    path: b\n    source: two\n")
 	write(t, filepath.Join(root, "a", "one"), "x")
 	write(t, filepath.Join(root, "a", "two"), "b\x00z")
 	first, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}})
@@ -66,7 +66,7 @@ func TestResolveFramesSnapshotPayloads(t *testing.T) {
 }
 func TestResolveRejectsEmptySourceArtifactList(t *testing.T) {
 	root := t.TempDir()
-	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts: []\n")
+	write(t, filepath.Join(root, "tbboot-source.yaml"), "schema_version: 1\nartifacts: []\n")
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
 		t.Fatal("expected error")
 	}
@@ -74,24 +74,23 @@ func TestResolveRejectsEmptySourceArtifactList(t *testing.T) {
 
 func TestResolveRejectsArtifactWithoutSteps(t *testing.T) {
 	root := fixture(t)
-	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps: []\n")
+	write(t, filepath.Join(root, "a", "tbboot-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\nsteps: []\n")
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
 		t.Fatal("Resolve() error = nil, want empty-step rejection")
 	}
 }
 
-func TestResolveParsesUnsupportedStepWithoutRejectingSource(t *testing.T) {
+func TestResolveRejectsUnsupportedStep(t *testing.T) {
 	root := fixture(t)
-	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: prompt\n    path: ignored\n")
-	got, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}})
-	if err != nil || got.Artifacts[0].Steps[0].Type != "prompt" {
-		t.Fatalf("Resolve() = %#v, %v", got, err)
+	write(t, filepath.Join(root, "a", "tbboot-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\nsteps:\n  - type: prompt\n    path: ignored\n")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
+		t.Fatal("expected unsupported step rejection")
 	}
 }
 
 func TestResolveRejectsArtifactSymlinkEscapingSourceRoot(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
-	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts:\n  - name: a\n    path: a\n")
+	write(t, filepath.Join(root, "tbboot-source.yaml"), "schema_version: 1\nartifacts:\n  - name: a\n    path: a\n")
 	if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
 		t.Skipf("symlink: %v", err)
 	}
@@ -116,8 +115,8 @@ func TestResolveRejectsStepInputSymlinkEscapingArtifactRoot(t *testing.T) {
 
 func TestResolveRejectsSourceDescriptorSymlinkEscapingSourceRoot(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
-	write(t, filepath.Join(outside, "source.yaml"), "schema_version: 1\nsource:\n  name: test\nartifacts: []\n")
-	if err := os.Symlink(filepath.Join(outside, "source.yaml"), filepath.Join(root, "talby-source.yaml")); err != nil {
+	write(t, filepath.Join(outside, "source.yaml"), "schema_version: 1\nartifacts: []\n")
+	if err := os.Symlink(filepath.Join(outside, "source.yaml"), filepath.Join(root, "tbboot-source.yaml")); err != nil {
 		t.Skipf("symlink: %v", err)
 	}
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
@@ -127,11 +126,11 @@ func TestResolveRejectsSourceDescriptorSymlinkEscapingSourceRoot(t *testing.T) {
 
 func TestResolveRejectsArtifactDescriptorSymlinkEscapingArtifactRoot(t *testing.T) {
 	root, outside := fixture(t), t.TempDir()
-	write(t, filepath.Join(outside, "artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps: []\n")
-	if err := os.Remove(filepath.Join(root, "a", "talby-artifact.yaml")); err != nil {
+	write(t, filepath.Join(outside, "artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\nsteps: []\n")
+	if err := os.Remove(filepath.Join(root, "a", "tbboot-artifact.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(outside, "artifact.yaml"), filepath.Join(root, "a", "talby-artifact.yaml")); err != nil {
+	if err := os.Symlink(filepath.Join(outside, "artifact.yaml"), filepath.Join(root, "a", "tbboot-artifact.yaml")); err != nil {
 		t.Skipf("symlink: %v", err)
 	}
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
@@ -147,16 +146,16 @@ func TestCapabilitiesProvideIdentity(t *testing.T) {
 
 func TestValidateSourceDescriptorRejectsInvalidFieldsAndDuplicates(t *testing.T) {
 	valid := sourceDescriptor{SchemaVersion: supportedSchemaVersion, Artifacts: []artifactRef{{Name: "a", Path: "a"}}}
-	valid.Source.Name = "source"
 	invalidSchema := valid
 	invalidSchema.SchemaVersion = 2
 	if validateSourceDescriptor(invalidSchema) == nil {
 		t.Fatal("expected schema rejection")
 	}
-	missingName := valid
-	missingName.Source.Name = ""
-	if validateSourceDescriptor(missingName) == nil {
-		t.Fatal("expected source name rejection")
+	invalidName := valid
+	invalidName.Artifacts = append([]artifactRef(nil), valid.Artifacts...)
+	invalidName.Artifacts[0].Name = "A"
+	if validateSourceDescriptor(invalidName) == nil {
+		t.Fatal("expected lowercase artifact name rejection")
 	}
 	incomplete := valid
 	incomplete.Artifacts = append([]artifactRef(nil), valid.Artifacts...)
@@ -174,7 +173,7 @@ func TestValidateSourceDescriptorRejectsInvalidFieldsAndDuplicates(t *testing.T)
 func TestValidateArtifactDescriptorRejectsSchemaNameAndVersion(t *testing.T) {
 	ref := artifactRef{Name: "a", Path: "a"}
 	valid := artifactDescriptor{SchemaVersion: supportedSchemaVersion, Steps: []artifactStep{{Type: "file", Path: "out", Source: "in"}}}
-	valid.Artifact.Name, valid.Artifact.Version = "a", "1"
+	valid.Artifact.Name, valid.Artifact.Version = "a", "1.0.0"
 	invalidSchema := valid
 	invalidSchema.SchemaVersion = 2
 	if validateArtifactDescriptor(ref, invalidSchema) == nil {
@@ -185,34 +184,34 @@ func TestValidateArtifactDescriptorRejectsSchemaNameAndVersion(t *testing.T) {
 	if validateArtifactDescriptor(ref, wrongName) == nil {
 		t.Fatal("expected name rejection")
 	}
-	missingVersion := valid
-	missingVersion.Artifact.Version = ""
-	if validateArtifactDescriptor(ref, missingVersion) == nil {
-		t.Fatal("expected version rejection")
+	invalidVersion := valid
+	invalidVersion.Artifact.Version = "1"
+	if validateArtifactDescriptor(ref, invalidVersion) == nil {
+		t.Fatal("expected canonical version rejection")
 	}
 }
 
 func TestResolveRejectsMalformedDescriptorsAndFileSteps(t *testing.T) {
 	root := fixture(t)
-	write(t, filepath.Join(root, "talby-source.yaml"), "schema_version: [")
+	write(t, filepath.Join(root, "tbboot-source.yaml"), "schema_version: [")
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
 		t.Fatal("expected malformed source descriptor")
 	}
 
 	root = fixture(t)
-	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: [")
+	write(t, filepath.Join(root, "a", "tbboot-artifact.yaml"), "schema_version: [")
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
 		t.Fatal("expected malformed artifact descriptor")
 	}
 
 	root = fixture(t)
-	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    source: in\n")
+	write(t, filepath.Join(root, "a", "tbboot-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\nsteps:\n  - type: file\n    source: in\n")
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
 		t.Fatal("expected missing target path rejection")
 	}
 
 	root = fixture(t)
-	write(t, filepath.Join(root, "a", "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1\nsteps:\n  - type: file\n    path: out\n")
+	write(t, filepath.Join(root, "a", "tbboot-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\nsteps:\n  - type: file\n    path: out\n")
 	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Locator: root}}); err == nil {
 		t.Fatal("expected missing source rejection")
 	}

@@ -19,9 +19,9 @@ func TestPreflightRecognizesCaseInsensitiveManagedOwner(t *testing.T) {
 	sourceB := repositorystate.SourceIdentity{Type: "file", Locator: "source-b"}
 	record := repositorystate.MaterializationRecord{Artifacts: []repositorystate.ManagedArtifactRecord{{
 		Source:          sourceA,
-		ResolvedVersion: "snapshot",
+		ResolvedVersion: testSnapshotVersion,
 		Artifact:        "a",
-		ArtifactVersion: "1",
+		ArtifactVersion: "1.0.0",
 		Files:           []repositorystate.ManagedFileRecord{{Path: "Folder/File", Digest: "unused"}},
 	}}}
 	desired := []desiredArtifact{{

@@ -134,6 +134,18 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 	if !approved(manifest.TrustPolicy, identity) && outsideRoot(identity) {
 		return Result{}, TrustPolicyError{Denied: []repositorystate.SourceIdentity{identity}}
 	}
+	var lock repositorystate.Lockfile
+	var record repositorystate.MaterializationRecord
+	if !request.DeclareOnly {
+		lock, err = service.loadLockfileOrEmpty(ctx, request.Root)
+		if err != nil {
+			return Result{}, err
+		}
+		record, err = service.loadMaterializationRecordOrEmpty(ctx, request.Root)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	acquire, err := repositorystate.AcquisitionLocator(request.Root, identity)
 	if err != nil {
 		return Result{}, err
@@ -155,14 +167,6 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 			return Result{}, err
 		}
 		return Result{Operation: "install", Outcome: OutcomeApplied, ArtifactCount: len(selected), Changes: []Change{{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact}}}, nil
-	}
-	lock, err := service.loadLockfileOrEmpty(ctx, request.Root)
-	if err != nil {
-		return Result{}, err
-	}
-	record, err := service.loadMaterializationRecordOrEmpty(ctx, request.Root)
-	if err != nil {
-		return Result{}, err
 	}
 	var locked *repositorystate.Resolution
 	if declaration.Target.Scope == repositorystate.DeclarationScopeArtifact {

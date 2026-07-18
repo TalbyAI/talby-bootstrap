@@ -10,11 +10,7 @@ func declarationFor(request Request, identity repositorystate.SourceIdentity) re
 	if request.Artifact != "" {
 		target = repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeArtifact, Artifact: request.Artifact}
 	}
-	d := repositorystate.Declaration{Source: identity, Target: target}
-	if request.Source.Locator != identity.Locator {
-		d.Input = &repositorystate.SourceInput{Locator: request.Source.Locator}
-	}
-	return d
+	return repositorystate.Declaration{Source: identity, Target: target}
 }
 func resolutionFor(identity repositorystate.SourceIdentity, resolved source.ResolvedSource, artifacts []source.ArtifactDescriptor) repositorystate.Resolution {
 	out := repositorystate.Resolution{Source: identity, ResolvedVersion: resolved.Identity.Version, Artifacts: make([]repositorystate.ArtifactResolution, 0, len(artifacts))}

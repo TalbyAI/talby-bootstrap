@@ -1,7 +1,7 @@
 schema_version: 1
 id: file-direct-install-multi-artifact
 kind: scenario
-status: broken
+status: active
 polarity: positive
 summary: Install two artifacts from a file source and record manifest, lockfile, and materialized files.
 commands:

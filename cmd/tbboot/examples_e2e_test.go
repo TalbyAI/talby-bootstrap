@@ -109,25 +109,14 @@ func stageExample(t *testing.T, example examples.Example) string {
 func readExampleSourceAlias(t *testing.T, example examples.Example) (string, bool) {
 	t.Helper()
 
-	if !exampleUsesFileSource(example.Metadata.Commands) {
-		return "", false
+	for _, command := range example.Metadata.Commands {
+		for _, arg := range command.Argv {
+			if strings.HasPrefix(arg, "file:") && strings.TrimPrefix(arg, "file:") != "" {
+				return strings.TrimPrefix(arg, "file:"), true
+			}
+		}
 	}
-	data, err := os.ReadFile(filepath.Join(example.Path, "source", "talby-source.yaml"))
-	if err != nil {
-		t.Fatalf("ReadFile(source/talby-source.yaml) error = %v", err)
-	}
-	var descriptor struct {
-		Source struct {
-			Name string `yaml:"name"`
-		} `yaml:"source"`
-	}
-	if err := yaml.Unmarshal(data, &descriptor); err != nil {
-		t.Fatalf("Unmarshal(source/talby-source.yaml) error = %v", err)
-	}
-	if descriptor.Source.Name == "" {
-		t.Fatal("source/talby-source.yaml missing source.name")
-	}
-	return descriptor.Source.Name, true
+	return "", false
 }
 
 func normalizeExampleArgs(argv []string, workspace string) ([]string, error) {

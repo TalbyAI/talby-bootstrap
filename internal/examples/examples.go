@@ -122,8 +122,8 @@ func loadExample(path string, parentGroup string) (Example, error) {
 		if err := requireDir(path, "source"); err != nil {
 			return Example{}, err
 		}
-		sourceDescriptorPath := filepath.Join(path, "source", "talby-source.yaml")
-		if err := requireFile(filepath.Join(path, "source"), "talby-source.yaml"); err != nil {
+		sourceDescriptorPath := filepath.Join(path, "source", "tbboot-source.yaml")
+		if err := requireFile(filepath.Join(path, "source"), "tbboot-source.yaml"); err != nil {
 			return Example{}, err
 		}
 		if err := validateSourceDescriptor(sourceDescriptorPath, meta.ID); err != nil {

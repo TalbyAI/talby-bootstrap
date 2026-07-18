@@ -2,62 +2,10 @@ package repositorystate
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 )
 
-func NormalizeSourceIdentity(root string, source SourceIdentity) (SourceIdentity, error) {
-	if source.Type == "" || source.Locator == "" {
-		return SourceIdentity{}, fmt.Errorf("source type and locator are required")
-	}
-	if source.Type != SourceTypeFile {
-		return SourceIdentity{}, fmt.Errorf("unsupported source type %q", source.Type)
-	}
-	base, err := filepath.Abs(root)
-	if err != nil {
-		return SourceIdentity{}, err
-	}
-	base, err = filepath.EvalSymlinks(base)
-	if err != nil {
-		return SourceIdentity{}, err
-	}
-	path := source.Locator
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(base, path)
-	}
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return SourceIdentity{}, err
-	}
-	path = filepath.Clean(path)
-	canonical, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		path = canonical
-	} else if !os.IsNotExist(err) {
-		return SourceIdentity{}, err
-	}
-	rel, err := filepath.Rel(base, path)
-	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		path = rel
-	}
-	return SourceIdentity{Type: source.Type, Locator: filepath.ToSlash(path)}, nil
-}
-func AcquisitionLocator(root string, source SourceIdentity) (string, error) {
-	normalized, err := NormalizeSourceIdentity(root, source)
-	if err != nil {
-		return "", err
-	}
-	if normalized != source {
-		return "", fmt.Errorf("source locator is not normalized")
-	}
-	path := source.Locator
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
-	}
-	return filepath.Abs(path)
-}
 func ValidateManifest(root string, manifest Manifest) error {
 	scopes, targets := map[string]DeclarationScope{}, map[string]struct{}{}
 	for _, source := range manifest.TrustPolicy.ApprovedSources {
@@ -80,6 +28,11 @@ func ValidateManifest(root string, manifest Manifest) error {
 		if err := validateDeclarationTarget(declaration.Target); err != nil {
 			return err
 		}
+		if declaration.SourceVersion != "" {
+			if declaration.Source.Type != SourceTypeGit || !isCanonicalSemVer(declaration.SourceVersion) {
+				return fmt.Errorf("source_version is only a canonical Git SemVer")
+			}
+		}
 		key := DeclarationKey(declaration)
 		if _, ok := targets[key]; ok {
 			return fmt.Errorf("duplicate declaration")
@@ -90,15 +43,6 @@ func ValidateManifest(root string, manifest Manifest) error {
 			return fmt.Errorf("source %q mixes source and artifact scopes", declaration.Source.Locator)
 		}
 		scopes[sourceKey] = declaration.Target.Scope
-		if declaration.Input != nil && declaration.Input.Locator != "" {
-			input, err := NormalizeSourceIdentity(root, SourceIdentity{Type: declaration.Source.Type, Locator: declaration.Input.Locator})
-			if err != nil {
-				return fmt.Errorf("declaration input: %w", err)
-			}
-			if input != declaration.Source {
-				return fmt.Errorf("declaration input locator does not match source locator")
-			}
-		}
 	}
 	return nil
 }

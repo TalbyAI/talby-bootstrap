@@ -1,0 +1,4 @@
+schema_version: 1
+declarations:
+  - source: file:./.tbboot-example/sources/local-example-source
+    scope: source

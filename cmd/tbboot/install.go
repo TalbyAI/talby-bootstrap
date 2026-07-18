@@ -130,14 +130,14 @@ func writeResult(stdout io.Writer, result installsvc.Result) error {
 }
 
 func parseSourceRef(raw string) (source.Ref, error) {
-	sourceType, locator, ok := strings.Cut(raw, ":")
-	if !ok || sourceType == "" || locator == "" {
-		return source.Ref{}, fmt.Errorf("source must be formatted as <type>:<locator>")
+	parsed, err := repositorystate.ParseSourceReference(raw)
+	if err != nil {
+		return source.Ref{}, err
 	}
 
 	return source.Ref{
-		Type:    sourceType,
-		Locator: locator,
+		Type:    parsed.Type,
+		Locator: parsed.Locator,
 	}, nil
 }
 

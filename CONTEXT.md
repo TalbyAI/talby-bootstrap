@@ -1,6 +1,14 @@
 # Talby Bootstrap
 
-Talby Bootstrap defines the language for a CLI that installs and maintains reusable repository artifacts from local or remote sources.
+Talby Bootstrap defines the language for a CLI that installs reusable repository artifacts from published Sources.
+
+## Product 0.1 contract
+
+The 0.1 release is the active contract in this document. It has one implemented command surface: `tbboot install`, including direct scalar `file:<locator>` references, `--artifact`, `--declare-only`, and targetless reconciliation. The implemented acquisition path is an in-root local `file:` Source and the only materialization step is whole-file `file`.
+
+All six YAML documents use `schema_version: 1`, strict readers, deterministic writers, and these canonical filenames: `tbboot-source.yaml`, `tbboot-artifact.yaml`, `tbboot-artifacts.yaml`, `tbboot-artifacts.lock.yaml`, `tbboot-artifacts.managed.yaml`, and `tbboot-artifacts.recovery.yaml`. Persisted Source References are scalar `file:<locator>` or `git:<locator>` values; Git identities are stored and validated but not acquired in 0.1. There is no migration from earlier filenames or structured source objects.
+
+Catalog, search, upgrade, Git acquisition, fragment/template/script/prompt steps, full rollback lifecycle, and persisted operation logs are deferred. The deferred design archive below is retained as context only and does not describe implemented 0.1 behavior.
 
 ## Language
 
@@ -17,7 +25,7 @@ The explicit manifest published for an **Artifact** that declares its version, d
 _Avoid_: Inline metadata, inferred manifest
 
 **Artifact Descriptor Filename**:
-The canonical filename used by an **Artifact** to publish its **Artifact Descriptor**. The initial filename is `talby-artifact.yaml`.
+The canonical filename used by an **Artifact** to publish its **Artifact Descriptor**. The initial filename is `tbboot-artifact.yaml`.
 _Avoid_: Generic artifact manifest name, implicit location
 
 **Artifact Descriptor Location**:
@@ -29,11 +37,11 @@ A published origin that defines and can deliver one or more **Artifacts** throug
 _Avoid_: Catalog
 
 **Acquisition Channel**:
-The consumer-side mechanism used to obtain a **Source** for resolution, trust evaluation, and locking. In v1, the supported acquisition channels are `file` and `git`.
+The consumer-side mechanism used to obtain a **Source** for resolution, trust evaluation, and locking. 0.1 acquires only in-root `file:` Sources; `git:` is a stored identity for a later acquisition implementation.
 _Avoid_: Source kind, published transport, inferred protocol
 
 **Source Type**:
-The explicit classification of an **Acquisition Channel** used in consumer-facing references, **Manifest** entries, trust policy checks, and **Lockfile** resolution records. In v1, only `file` and `git` are supported source types for approval and resolution.
+The explicit classification of an **Acquisition Channel** used in consumer-facing references, **Manifest** entries, trust policy checks, and **Lockfile** resolution records. The persistence contract recognizes `file` and `git`; 0.1 acquisition supports only in-root `file`.
 _Avoid_: Published source kind, inferred protocol, source guess
 
 **Source Descriptor**:
@@ -45,15 +53,15 @@ The explicit schema version declared by a **Source Descriptor** so the CLI can p
 _Avoid_: Implicit format version, source type version
 
 **Source Version**:
-The version or snapshot identifier that represents a resolved state of a **Source** as obtained through a specific **Acquisition Channel**. When direct install omits an explicit source version, `git` resolution defaults to the latest stable published source version, while `file` resolution records a local snapshot hash in the **Lockfile**. Once resolved, later sync operations keep that resolved source version until the user explicitly asks to move to a newer one.
+The version or snapshot identifier that represents a resolved state of a **Source** as obtained through a specific **Acquisition Channel**. In 0.1, `file` resolution records a deterministic `sha256:` snapshot hash in the **Lockfile**; Git version storage is validated but acquisition and advancement are deferred.
 _Avoid_: Artifact version, floating state
 
 **Source Identity**:
-The stable consumer-side identity used to distinguish one acquired source from another for declaration, trust, and locking. In v1, **Source Identity** includes **Source Type** plus source name or locator, so identical published content acquired through different channels is still treated as different sources.
+The stable consumer-side identity used to distinguish one acquired source from another for declaration, trust, and locking. It consists of **Source Type** plus the normalized source locator, so identical published content acquired through different channels is still treated as different sources.
 _Avoid_: Source Descriptor alone, content hash alone, artifact path
 
 **Source Descriptor Filename**:
-The canonical filename used by a **Source** to publish its **Source Descriptor**. The initial filename is `talby-source.yaml`.
+The canonical filename used by a **Source** to publish its **Source Descriptor**. The initial filename is `tbboot-source.yaml`.
 _Avoid_: Generic source manifest name, implicit location
 
 **Catalog**:
@@ -65,7 +73,7 @@ A resolvable location or identifier used to register a **Catalog** before it has
 _Avoid_: Local catalog name, catalog source
 
 **Direct Install Reference**:
-The explicit typed source reference a user can provide to install an **Artifact** directly from its **Source** without relying on any **Catalog**. Its canonical form identifies the source as `{source-type}:{source-name}` and therefore carries **Source Identity** through the declared **Acquisition Channel**; the artifact is selected separately, and any direct-install version pin applies to the **Source Version** rather than being embedded in the artifact selector. Ambiguity is evaluated only after normalization within the declared **Source Type**.
+The scalar typed source reference a user can provide to install an **Artifact** directly from its **Source** without relying on any **Catalog**. Its canonical form is `{source-type}:{locator}`; the artifact is selected separately.
 _Avoid_: Catalog entry, inferred lookup
 
 **Catalog Install Reference**:
@@ -81,7 +89,7 @@ The canonical serialization used to write a **Manifest**. The initial format is 
 _Avoid_: Multi-format by default, implicit format
 
 **Manifest Filename**:
-The canonical filename used to store the versioned **Manifest** in a consumer repository. The initial filename is `talby-artifacts.yaml`.
+The canonical filename used to store the versioned **Manifest** in a consumer repository. The initial filename is `tbboot-artifacts.yaml`.
 _Avoid_: Generic config name, implicit location
 
 **Manifest Location**:
@@ -89,7 +97,7 @@ The canonical location where a **Manifest** is stored. Consumer manifests live a
 _Avoid_: Hidden path, arbitrary location
 
 **Lockfile Filename**:
-The canonical filename used to store the versioned **Lockfile** in a consumer repository. The initial filename is `talby-artifacts.lock.yaml`.
+The canonical filename used to store the versioned **Lockfile** in a consumer repository. The initial filename is `tbboot-artifacts.lock.yaml`.
 _Avoid_: Generic lock name, implicit location
 
 **Lockfile Location**:
@@ -105,19 +113,19 @@ A reproducible record of a **Resolution**, including the exact versions or immut
 _Avoid_: Manifest, machine config
 
 **Floating Source**:
-A source-level installation mode where future artifacts added to a **Source** may be picked up automatically on later sync operations.
+A deferred source-level installation mode where future artifacts added to a **Source** may be picked up automatically on later sync operations.
 _Avoid_: Pinned source, snapshot
 
 **Pinned Source**:
-A source-level installation mode where the installed set of artifacts is limited to the resolved snapshot captured at the time of installation.
+A deferred source-level installation mode where the installed set of artifacts is limited to the resolved snapshot captured at the time of installation.
 _Avoid_: Floating source, live source
 
 **Trust Policy**:
-The versioned security policy that controls which artifacts, materialization step types, approved source identities, or age constraints are allowed for a consumer repository. The manifest defines the allowlist of approved **Source Identity** values; approval of one acquired source does not automatically approve every other channel that could publish similar content, nor every risky step type it can deliver. `file:` sources are allowed by default only when they point inside the current **Operation Root**; `git:` sources always require explicit approval in the manifest. Source types that can prove publication time may also be constrained by a minimum age rule. Local machine settings may harden this policy, but should not silently weaken it.
+The versioned security policy for approved **Source Identity** values. In 0.1, the implemented boundary allows in-root `file:` Sources and does not acquire Git or execute risky materialization steps; broader approval and age rules are deferred.
 _Avoid_: Machine default, ad hoc flag
 
 **Minimum Age Rule**:
-A trust constraint that rejects a resolved installation target unless its exact resolved publication, tag, commit, or version is older than the configured minimum age.
+A deferred trust constraint that may reject a resolved installation target unless its exact resolved publication, tag, commit, or version is older than the configured minimum age.
 _Avoid_: Source age, catalog age
 
 **Overwrite Policy**:
@@ -137,7 +145,7 @@ The canonical machine-readable output shape for CLI commands when JSON output is
 _Avoid_: Ad hoc JSON, command-specific envelope
 
 **Exit Code**:
-The canonical process result code returned by the CLI to classify overall command outcome for shells, CI, and automation. V1 uses `0` for success, including no-op, Dry Run, and success with warnings; `1` for usage, validation, acquisition, unavailable Resolution, I/O, cancellation, rollback, and other operational failures; `2` for user-action conflicts and unresolved Recovery State; and `3` for Trust Policy denial.
+The canonical process result code returned by the CLI to classify overall command outcome for shells, CI, and automation. The 0.1 CLI uses `0` for success, `1` for operational or validation errors, `2` for user-action conflicts, and `3` for trust or policy denial.
 _Avoid_: Message parsing, ad hoc status
 
 **CLI Command Name**:
@@ -181,15 +189,15 @@ The home-directory folder `.tbboot` that stores user-scoped Talby Bootstrap conf
 _Avoid_: Repository state, hidden temp cache
 
 **Install Command**:
-The primary user-facing command for artifact management. The canonical command is `install`, with alias `i`; without arguments it runs **Sync**, and with one explicit target it declares and applies that target unless a declarative-only mode is requested. V1 does not accept multiple explicit install targets in a single command, and ambiguous target syntax fails until the user provides an unambiguous form.
+The implemented user-facing command for artifact management. The canonical command is `install`, with alias `i`; without arguments it runs **Sync**, and with one scalar direct Source Reference it declares and applies that target unless `--declare-only` is requested.
 _Avoid_: sync command, add command
 
 **Upgrade Command**:
-The dedicated user-facing command for advancing already-declared artifacts or sources to newer resolved versions. Without arguments, it attempts to upgrade the entire manifest. With one explicit target, it accepts the same unambiguous source forms as `install`, optionally narrowed with `--artifact`. V1 does not accept multiple explicit upgrade targets in a single command. Source targets upgrade the whole declared source; `--artifact` upgrades only the selected artifact. Targets not already declared in the manifest are rejected instead of being installed implicitly. If the manifest declares a whole source, upgrade must respect that scope and reject artifact-level upgrade requests inside that source. It supports the same **Dry Run** contract as other reconciliation flows: resolve and report without mutating manifest, lockfile, or files. Bare `upgrade` applies targets in deterministic order, processing whole sources before individual artifacts and sorting each group lexicographically by normalized identity, then stops at the first mutating failure. Successful upgrade writes the new exact resolution to the **Lockfile** and leaves the **Manifest** unchanged unless the user's declared intent changes. For `git:` targets, upgrade advances to the latest stable published Source Version allowed by the active trust policy. For `file:` targets, upgrade re-reads the current local path and records the resulting snapshot hash; an unchanged snapshot is a no-op. These rules apply to both bare and explicit upgrade: Source scope updates every declared Artifact in the Source snapshot, while Artifact scope updates only the selected Artifact and leaves sibling Artifacts on their existing snapshots. The canonical command name is `upgrade`.
+The deferred command intended to advance already-declared artifacts or sources to newer resolved versions. It is not available in 0.1.
 _Avoid_: Sync alias, catalog refresh
 
 **Operation Summary**:
-The default short human-readable output shown after install, Sync, and upgrade. Success uses one stable result line followed only by effective changes, or planned changes during Dry Run. Failures use one concise cause line followed only by actionable typed details. Success is written to standard output, failure to standard error, and human warnings use a `warning:` prefix on standard error.
+The default short human-readable output shown after the implemented `install` or **Sync** operation. Success is written to standard output and failure to standard error.
 _Avoid_: Full verbose log, success-only silence
 
 **Operation Root**:
@@ -197,31 +205,31 @@ The consumer root used to resolve relative Source References and scope repositor
 _Avoid_: Session cwd only, global implicit scope
 
 **Declare-Only Install**:
-An **Install Command** mode enabled by `--declare-only` that updates only the **Manifest** without materializing artifacts, updating the **Lockfile**, or touching cache state. This remains true for direct source installs and catalog-qualified installs.
+An **Install Command** mode enabled by `--declare-only` that updates only the **Manifest** without materializing artifacts or updating the **Lockfile**. In 0.1 it applies to direct scalar Source References.
 _Avoid_: Partial install, preview install
 
 **Catalog Refresh**:
-The catalog maintenance operation that refreshes cached catalog metadata and indexes without changing the **Manifest**, **Lockfile**, or installed artifacts. Without explicit catalog arguments, it refreshes all configured catalogs.
+The deferred catalog maintenance operation that refreshes cached catalog metadata and indexes without changing the **Manifest**, **Lockfile**, or installed artifacts.
 _Avoid_: Upgrade check, install refresh
 
 **Catalog Cache**:
-The cached catalog metadata and indexes stored in the **User Configuration Directory** for discovery and resolution support.
+The deferred cached catalog metadata and indexes stored in the **User Configuration Directory** for discovery and resolution support.
 _Avoid_: Installed artifacts, lockfile state
 
 **Catalog Add**:
-The catalog maintenance operation that registers a catalog in active configuration and performs an initial fetch so the catalog is usable immediately. Its canonical command shape is `catalog add <catalog-reference> --name <local-name>`, while omitting `--name` is allowed only when the catalog provides a non-conflicting default local name. If the chosen local name conflicts with an existing configured catalog, the add fails and reports the conflicting catalog so a different name can be chosen. If the initial fetch fails, the catalog is not registered.
+The deferred catalog maintenance operation that registers a catalog in active configuration and performs an initial fetch.
 _Avoid_: Config-only add, deferred activation
 
 **Catalog Remove**:
-The catalog maintenance operation that removes a catalog from active configuration and deletes its associated **Catalog Cache** so its indexes and artifacts no longer appear from that catalog. Its canonical target is the configured local catalog name: `catalog remove <local-name>`.
+The deferred catalog maintenance operation that removes a catalog from active configuration and deletes its associated **Catalog Cache**.
 _Avoid_: Soft disable, stale cache retention
 
 **Catalog List**:
-The catalog maintenance operation that shows configured catalogs together with minimal operational status. Its default output includes `local-name`, `catalog-reference`, `cache-status`, `last-refresh`, and `last-refresh-result`.
+The deferred catalog maintenance operation that shows configured catalogs together with operational status.
 _Avoid_: Config-only listing, verbose diagnostics dump
 
 **Search Command**:
-The top-level command that queries all configured catalog caches and returns matching **Sources** as the primary result unit. Artifact information is shown as summary or expanded detail according to output flags, using **Artifact Name** and indexable **Artifact Descriptor** metadata such as description, tags, and materialization step types. In non-interactive CLI use it requires an explicit query.
+The deferred top-level command that queries configured catalog caches and returns matching **Sources**.
 _Avoid_: catalog admin command, full repository search
 
 **Managed Artifact**:
@@ -233,11 +241,11 @@ One declared action in an **Artifact Descriptor** that writes, updates, renders,
 _Avoid_: Artifact type, hidden install behavior
 
 **Materialization Step Type**:
-The category of a **Materialization Step** that defines how that step is interpreted. V1 step types are `file`, `fragment`, `template`, `script`, and `prompt`; `script` and `prompt` are risky step types requiring explicit allowlisting and first-install confirmation.
+The category of a **Materialization Step** that defines how that step is interpreted. Product 0.1 accepts only whole-file `file`; fragment, template, script, and prompt are deferred.
 _Avoid_: Artifact kind, source type
 
 **Removal Policy**:
-The rule that determines how **Sync** handles a **Managed Artifact** that is no longer present in the final desired state resolved from the complete **Manifest**. V1 authorizes removal only through `--prune` on the targetless **Install Command**, never from a targeted install subset.
+The deferred rule that determines how **Sync** handles a **Managed Artifact** that is no longer present in the final desired state. Prune is not implemented in 0.1.
 _Avoid_: Garbage collection, overwrite policy
 
 **Materialization Record**:
@@ -249,7 +257,7 @@ The minimal user-visible identity shown for an effective or planned managed chan
 _Avoid_: Opaque change, path-only report
 
 **Ownership Conflict**:
-The explicit conflict state where two **Managed Artifacts** would claim the same whole file or overlapping fragment region. Ownership is exclusive, so this conflict must be detected before writing.
+The explicit conflict state where two **Managed Artifacts** would claim the same whole file. Fragment overlap is deferred; ownership is exclusive.
 _Avoid_: Shared ownership, last-write-wins
 
 **Recovery State**:
@@ -257,7 +265,7 @@ The explicit failure state recorded atomically when verified best-effort rollbac
 _Avoid_: Silent partial failure, implicit dirty state
 
 **Recovery State Filename**:
-The canonical filename used to store **Recovery State** at the consumer repository root. The initial filename is `talby-artifacts.recovery.yaml`.
+The canonical filename used to store **Recovery State** at the consumer repository root. The initial filename is `tbboot-artifacts.recovery.yaml`.
 _Avoid_: Recovery log, temporary backup filename
 
 **Fragment**:
@@ -265,11 +273,11 @@ A bounded section inserted by an **Artifact** inside an existing file instead of
 _Avoid_: Whole file, anonymous patch
 
 **Fragment Boundary**:
-The explicit start and end markers that identify a **Fragment** so it can be updated or removed safely later. These markers are visible in the target file, include the artifact identity and fragment name, and use file-appropriate comment syntax.
+The deferred explicit start and end markers that identify a **Fragment** so it can be updated or removed safely later.
 _Avoid_: Fuzzy match, heuristic location
 
 **Fragment Drift**:
-The state where the content inside a managed **Fragment** no longer matches what the CLI previously materialized.
+The deferred state where the content inside a managed **Fragment** no longer matches what the CLI previously materialized.
 _Avoid_: Expected update, normal sync
 
 **Whole-File Drift**:
@@ -285,7 +293,7 @@ _Avoid_: Expected update, normal sync
 - An **Artifact Descriptor** lives in the root folder of its individual **Artifact**
 - An **Artifact Descriptor** declares one or more **Materialization Steps**
 - A **Materialization Step** has exactly one **Materialization Step Type**
-- A **Materialization Step Type** may require explicit enablement before an artifact containing that step can be installed
+- Product 0.1 accepts only the whole-file `file` **Materialization Step Type**
 - A **Source** provides one or more **Artifacts**
 - A **Source** does not declare its **Source Type** in the published descriptor
 - An **Acquisition Channel** has exactly one **Source Type**
@@ -309,86 +317,70 @@ _Avoid_: Expected update, normal sync
 - A **Manifest** lives at the consumer repository root
 - A **Manifest** declares one or more desired **Artifacts**
 - A **Manifest** may also declare an entire **Source Identity**, which implies all of its resolved **Artifacts**
-- A whole-**Source** install defaults to **Pinned Source** behavior
-- **Floating Source** behavior must be enabled explicitly
+- Whole-**Source** install in 0.1 is pinned to its recorded snapshot
 - A **Manifest** defines the base **Trust Policy** for its consumer repository
 - A **Trust Policy** defines an explicit allowlist of approved **Source Identity** values
 - A **Manifest** may define an **Overwrite Policy**
 - Local machine settings may harden the **Trust Policy** or require more confirmation
 - A **Manifest** expresses installation intent, not exact resolved versions
 - A **Resolution** is derived from a **Manifest**
-- A **Minimum Age Rule** is evaluated against the exact **Resolution**
+- **Minimum Age Rule** evaluation is deferred beyond 0.1
 - A **Lockfile** persists a **Resolution** for reproducible installation
 - A **Lockfile** has exactly one canonical **Lockfile Filename**
 - A **Lockfile** lives at the consumer repository root
 - A whole-**Source** resolution in the **Lockfile** includes the exact resolved **Artifacts** and their versions
 - An **Overwrite Policy** may inspect Git state before replacing files
 - The **Artifact Management Surface** is centered on the **Install Command**
-- A bare `install <name>` may proceed only when the matching catalog entries resolve to one unique source identity, or all hits collapse to the same source and source version
+- A direct scalar `install file:<locator>` reference is resolved without a catalog
 - A command may render results through the **JSON Output Envelope** when machine-readable output is requested
 - An **Exit Code** classifies command outcome as success, operational error, user-action conflict, or trust/policy denial
-- Install, Sync, and upgrade show an **Operation Summary** immediately
+- Install and Sync show an **Operation Summary** immediately
 - A successful operation writes its result to standard output; a failed operation writes its result to standard error
 - Human warnings use standard error, while JSON warnings remain inside the single **JSON Output Envelope**
-- A **Provenance Summary** accompanies effective changes and planned Dry Run changes only
-- The **Catalog Management Surface** contains catalog configuration and **Catalog Refresh**
-- The **User Configuration Directory** stores **Catalog Cache** and other user-scoped configuration
-- The **User Configuration Directory** contains a `catalogs` subdirectory for **Catalog Cache**
+- A **Provenance Summary** accompanies effective install changes
+- Catalog management and **Catalog Cache** are deferred beyond 0.1
 - The **Install Command** without arguments runs **Sync**
 - The **Install Command** may use a **Direct Install Reference** without any configured **Catalog**
-- The **Install Command** may use a **Catalog Install Reference** when resolving through a configured **Catalog**
-- The **Search Command** returns **Sources** as the primary result unit
-- A configured **Catalog** has one unique local name used for catalog-qualified install references
+- **Catalog Install Reference** and **Search Command** are deferred beyond 0.1
 - The **Install Command** with artifact arguments declares and applies those **Artifacts** by default
-- The **Install Command** may also accept a **Direct Install Reference** without any configured **Catalog**
+- The **Install Command** accepts a scalar **Direct Install Reference** without any configured **Catalog**
 - **Declare-Only Install** updates only the **Manifest**
-- **Catalog Add** registers a catalog and performs an initial fetch
-- **Catalog Refresh** updates cached catalog metadata and indexes only
-- **Catalog List** shows configured catalogs with minimal operational status
-- **Catalog Remove** deletes the removed catalog's associated **Catalog Cache**
-- The **Search Command** queries catalog indexes without changing installed state
+- Catalog commands and **Search Command** are deferred beyond 0.1
 - **Sync** reconciles actual state against the **Manifest** and its **Resolution**
-- **Dry Run** executes reconciliation without mutating files
+- **Dry Run** is deferred beyond 0.1
 - The canonical **CLI Command Name** for this tool is `tbboot`
-- A **Managed Artifact** is eligible for drift detection and controlled removal by **Sync**
-- A **Managed Artifact** is materialized by applying its declared **Materialization Steps**
+- A **Managed Artifact** is eligible for whole-file drift detection by **Sync**
+- A **Managed Artifact** is materialized by applying its declared whole-file `file` **Materialization Steps**
 - A **Materialization Record** belongs to a **Managed Artifact**
-- A **Materialization Record** tracks whole files and any inserted **Fragments**
+- A **Materialization Record** tracks whole files in 0.1; **Fragments** are deferred
 - A managed change is reported to the user with a **Provenance Summary**
-- An **Ownership Conflict** exists when two **Managed Artifacts** would claim the same whole file or overlapping fragment region
-- A failed materialization may enter **Recovery State** when verified rollback is incomplete
+- An **Ownership Conflict** exists when two **Managed Artifacts** would claim the same whole file; fragment overlap is deferred
+- **Recovery State** has a persisted schema contract; runtime creation and rollback lifecycle are deferred
 - **Recovery State** has exactly one canonical **Recovery State Filename**
 - **Recovery State** stores canonical root-relative paths and sanitized failure metadata, not prior file contents or raw errors
-- **Recovery State** blocks every mutating operation against the same consumer repository until its recorded prior observations are verified
-- A **Fragment** is delimited by exactly two **Fragment Boundaries**
-- Each **Fragment Boundary** identifies its owning artifact and fragment name
-- Visible **Fragment Boundaries** are the default mechanism for managed fragment insertion
-- **Fragment Drift** is detected by comparing the current fragment contents against the prior **Materialization Record**
+- Recovery blocking and manual-repair verification are deferred beyond 0.1
+- Fragment boundaries and **Fragment Drift** are deferred beyond 0.1
 - **Whole-File Drift** is detected by comparing the current whole-file contents against the prior **Materialization Record**
-- The default reaction to **Fragment Drift** is to prompt before updating or removing the fragment
 - **Whole-File Drift** is accumulated during preflight and blocks the entire mutation with a user-action conflict
-- The default **Removal Policy** reports removal-required conflicts; `--prune` authorizes removal only from the complete Manifest-resolved desired state
+- Prune and broader **Removal Policy** behavior are deferred beyond 0.1
 - A whole file already owned by the same **Managed Artifact** may be overwritten automatically when it still matches the prior **Materialization Record**
 
 ## Canonical examples
 
-`tbboot install foo`
-: Resolves `foo` through configured **Catalogs** as a shorthand **Main Artifact** install. It proceeds only when matches collapse to one source identity and source version.
-
-`tbboot install foo --declare-only`
-: Records the resolved shorthand target in the **Manifest** without materializing artifacts, updating the **Lockfile**, or touching cache state.
-
-`tbboot install foo`
-: Fails as ambiguous when configured **Catalogs** contain `foo` matches that resolve to different source identities or source versions.
+`tbboot install file:./artifacts`
+: Resolves the in-root local Source, records its scalar Source Reference and snapshot in the canonical state files, and materializes all declared artifacts.
 
 `tbboot install file:./artifacts --artifact editorconfig`
-: May proceed without explicit source approval when `./artifacts` is inside the current **Operation Root** and its materialization step types are allowed by policy. If no source version is explicit, the **Lockfile** records a local snapshot hash.
+: Resolves and materializes one named artifact from the in-root Source.
 
-`tbboot install git:https://example.com/talby/artifacts.git --artifact editorconfig`
-: Fails with trust or policy denial until that exact **Source** is approved in the versioned **Manifest**.
+`tbboot install file:./artifacts --declare-only`
+: Records only the scalar declaration in `tbboot-artifacts.yaml`; it does not write a Lockfile or materialize files.
 
-`tbboot install git:https://example.com/talby/artifacts.git --artifact bootstrap-script`
-: Still fails when the source is approved but the artifact contains a risky **Materialization Step Type**, such as `script` or `prompt`, that has not been explicitly allowlisted and confirmed for first install.
+`tbboot install file:./artifacts --artifact editorconfig`
+: Resolves an in-root Source and records its local snapshot hash in the **Lockfile**.
+
+`tbboot install git:https://example.com/example/artifacts.git`
+: Is stored as a valid Source Reference by the persistence contract but fails in 0.1 because Git acquisition is deferred.
 
 ## Example dialogue
 
@@ -397,29 +389,10 @@ _Avoid_: Expected update, normal sync
 >
 > **Dev:** "If I run `tbboot install foo`, does that only declare `foo` or also apply it?"
 > **Domain expert:** "The **Install Command** declares and applies by default; use **Declare-Only Install** when you want to update only the **Manifest**."
->
-> **Dev:** "If I remove a catalog, why do its results disappear from search immediately?"
-> **Domain expert:** "Because **Catalog Remove** also deletes that catalog's **Catalog Cache** from the **User Configuration Directory**."
->
-> **Dev:** "Where does user-scoped cache live?"
-> **Domain expert:** "In the **User Configuration Directory** `.tbboot`, with `catalogs` for **Catalog Cache**."
->
-> **Dev:** "After `catalog add`, do I need a separate refresh before search works?"
-> **Domain expert:** "No. **Catalog Add** performs an initial fetch so the catalog is usable immediately."
->
-> **Dev:** "What if the initial fetch fails during `catalog add`?"
-> **Domain expert:** "Then **Catalog Add** fails atomically and the catalog is not registered."
->
-> **Dev:** "What does `catalog list` show besides the configured names?"
-> **Domain expert:** "It shows each configured catalog with minimal operational status, including cache presence and refresh outcome."
->
-> **Dev:** "Does `search` hit the network before answering?"
-> **Domain expert:** "No. The **Search Command** uses the local cache from all configured catalogs unless you refresh explicitly."
->
-> **Dev:** "If two catalogs both list the same artifact, do I get an ambiguity error?"
-> **Domain expert:** "Only if they resolve to different **Sources**. A **Catalog** is just an index; if both entries point to the same **Source**, installation may proceed."
 
-## Flagged ambiguities
+## Design history (not active 0.1 contract)
+
+The remaining notes preserve earlier product exploration. They are not implementation promises for 0.1; future tickets must promote a capability into the active contract before code or fixtures rely on it.
 
 - "pattern", "snippet", and "module" were used for the same concept — resolved: use **Artifact** as the canonical term
 - "source" and "catalog" could be conflated — resolved: **Source** delivers, while **Catalog** indexes
@@ -444,10 +417,10 @@ _Avoid_: Expected update, normal sync
 - fragment removal could become heuristic and unsafe — resolved: default to visible **Fragment Boundaries** for managed fragments
 - manual edits inside managed fragments could be lost silently — resolved: detect **Fragment Drift** and prompt before update or removal
 - local cache could conflate catalog indexes with source materialization — resolved: v1 includes **Catalog Cache** for catalog metadata and indexes, but excludes source and materialization caches until a real performance need is measured
-- manifest discovery could be ambiguous — resolved: the canonical **Manifest Filename** is `talby-artifacts.yaml`
-- lockfile discovery could be ambiguous — resolved: the canonical **Lockfile Filename** is `talby-artifacts.lock.yaml`
-- source descriptor discovery could be ambiguous — resolved: the canonical **Source Descriptor Filename** is `talby-source.yaml`
-- artifact descriptor discovery could be ambiguous — resolved: the canonical **Artifact Descriptor Filename** is `talby-artifact.yaml`
+- manifest discovery could be ambiguous — resolved: the canonical **Manifest Filename** is `tbboot-artifacts.yaml`
+- lockfile discovery could be ambiguous — resolved: the canonical **Lockfile Filename** is `tbboot-artifacts.lock.yaml`
+- source descriptor discovery could be ambiguous — resolved: the canonical **Source Descriptor Filename** is `tbboot-source.yaml`
+- artifact descriptor discovery could be ambiguous — resolved: the canonical **Artifact Descriptor Filename** is `tbboot-artifact.yaml`
 - descriptor placement could be confused across repository and artifact scopes — resolved: consumer/source manifests live at repo root; artifact descriptors live in each artifact folder
 - lockfile placement could drift from the consumer manifest — resolved: the **Lockfile** lives at the consumer repository root beside the manifest
 - the CLI binary name could consume the broader suite brand — resolved: use `tbboot` for this tool and reserve `Talby` for the wider suite
@@ -512,7 +485,7 @@ _Avoid_: Expected update, normal sync
 - catalog-based declarations could become unstable after lockfile loss — resolved: the **Manifest** stores enough source identity to re-resolve declared targets stably without depending on fresh search ambiguity
 - manifest entries could end up with two competing truths — resolved: only stable source identity is normative in the **Manifest**, while any original user-facing reference is optional metadata only
 
-## Interview state
+## Interview state archive
 
 This section preserves the current specification interview state by explicit user request so the sequence of decisions and remaining open areas is not lost.
 

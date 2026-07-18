@@ -9,8 +9,17 @@ import (
 func ValidateLockfile(lockfile Lockfile) error {
 	snapshots, artifacts := map[SnapshotKey]struct{}{}, map[ArtifactKey]struct{}{}
 	for _, resolution := range lockfile.Resolutions {
-		if resolution.Source.Type == "" || resolution.Source.Locator == "" || resolution.ResolvedVersion == "" {
+		if resolution.Source.Type != SourceTypeFile && resolution.Source.Type != SourceTypeGit {
+			return fmt.Errorf("unsupported source type %q", resolution.Source.Type)
+		}
+		if resolution.Source.Locator == "" || resolution.ResolvedVersion == "" {
 			return fmt.Errorf("complete snapshot fields are required")
+		}
+		if resolution.Source.Type == SourceTypeFile && !isSHA256Digest(resolution.ResolvedVersion) {
+			return fmt.Errorf("file source version must be a sha256 digest")
+		}
+		if resolution.Source.Type == SourceTypeGit && (!isCanonicalSemVer(resolution.ResolvedVersion) || !isGitCommit(resolution.Commit)) {
+			return fmt.Errorf("Git resolution requires canonical SemVer and full commit")
 		}
 		sk := SnapshotKey{resolution.Source, resolution.ResolvedVersion}
 		if _, ok := snapshots[sk]; ok {
@@ -21,7 +30,7 @@ func ValidateLockfile(lockfile Lockfile) error {
 			return fmt.Errorf("snapshot requires artifacts")
 		}
 		for _, artifact := range resolution.Artifacts {
-			if artifact.Name == "" || artifact.Version == "" {
+			if artifact.Name == "" || !isCanonicalSemVer(artifact.Version) {
 				return fmt.Errorf("complete artifact fields are required")
 			}
 			key := ArtifactKey{resolution.Source, artifact.Name}
@@ -99,7 +108,7 @@ func (lockfile Lockfile) KeepArtifacts(keys map[ArtifactKey]struct{}) (Lockfile,
 	var next Lockfile
 	var removed []ArtifactKey
 	for _, r := range lockfile.Resolutions {
-		nr := Resolution{Source: r.Source, ResolvedVersion: r.ResolvedVersion}
+		nr := Resolution{Source: r.Source, ResolvedVersion: r.ResolvedVersion, Commit: r.Commit}
 		for _, a := range r.Artifacts {
 			k := ArtifactKey{r.Source, a.Name}
 			if _, ok := keys[k]; ok {

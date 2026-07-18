@@ -1,0 +1,9 @@
+schema_version: 1
+artifacts:
+  - source: file:./.tbboot-example/sources/local-example-source
+    source_version: sha256:3b291688ffd27d879adf6458c9c245cf45770b4d63660c35725f14ea264fd04a
+    artifact: base-readme
+    artifact_version: 1.0.0
+    files:
+      - path: README.md
+        digest: sha256:0433bc38298832688ce91714430a166f2c060d75380590c14563ef3ddff8ab95
