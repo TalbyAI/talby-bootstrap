@@ -15,8 +15,13 @@ func ValidateLockfile(lockfile Lockfile) error {
 		if resolution.Source.Locator == "" || resolution.ResolvedVersion == "" {
 			return fmt.Errorf("complete snapshot fields are required")
 		}
-		if resolution.Source.Type == SourceTypeFile && !isSHA256Digest(resolution.ResolvedVersion) {
-			return fmt.Errorf("file source version must be a sha256 digest")
+		if resolution.Source.Type == SourceTypeFile {
+			if !isSHA256Digest(resolution.ResolvedVersion) {
+				return fmt.Errorf("file source version must be a sha256 digest")
+			}
+			if resolution.Commit != "" {
+				return fmt.Errorf("file source must not contain a commit")
+			}
 		}
 		if resolution.Source.Type == SourceTypeGit && (!isCanonicalSemVer(resolution.ResolvedVersion) || !isGitCommit(resolution.Commit)) {
 			return fmt.Errorf("Git resolution requires canonical SemVer and full commit")

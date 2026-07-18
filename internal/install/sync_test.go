@@ -416,6 +416,37 @@ func TestSyncReconstructsMissingLockOnlyOnExactManagedMatch(t *testing.T) {
 		t.Fatalf("Sync() = %#v, %v", got, err)
 	}
 }
+
+func TestSyncRejectsMaterializationRecordThatDiffersFromLockfile(t *testing.T) {
+	root := t.TempDir()
+	sourceID := repositorystate.SourceIdentity{Type: "file", Locator: "./source"}
+	syncManifest(t, root, artifactDeclaration("a"))
+	store := repositorystate.NewStore()
+	if err := store.WriteLockfile(context.Background(), root, repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{{
+		Source:          sourceID,
+		ResolvedVersion: testSnapshotVersion,
+		Artifacts:       []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteMaterializationRecord(context.Background(), root, repositorystate.MaterializationRecord{Artifacts: []repositorystate.ManagedArtifactRecord{{
+		Source:          sourceID,
+		ResolvedVersion: testSnapshotVersionB,
+		Artifact:        "a",
+		ArtifactVersion: "1.0.0",
+		Files:           []repositorystate.ManagedFileRecord{{Path: "a", Digest: testSnapshotVersion}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err == nil || !strings.Contains(err.Error(), "does not match a lockfile resolution") {
+		t.Fatalf("Sync() error = %v, want cross-document validation", err)
+	}
+	if impl.calls != 0 {
+		t.Fatalf("Resolve calls = %d, want 0", impl.calls)
+	}
+}
+
 func TestSyncPrunesStaleUnmanagedLockState(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root)

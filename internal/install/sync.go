@@ -44,12 +44,15 @@ func (service Service) Sync(ctx context.Context, request SyncRequest) (Result, e
 	if err != nil {
 		return Result{}, err
 	}
-	lock, err := service.loadLockfileOrEmpty(ctx, request.Root)
+	lock, _, err := service.loadLockfile(ctx, request.Root)
 	if err != nil {
 		return Result{}, err
 	}
-	record, err := service.loadMaterializationRecordOrEmpty(ctx, request.Root)
+	record, _, err := service.loadMaterializationRecord(ctx, request.Root)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := repositorystate.ValidateCrossDocumentState(lock, record); err != nil {
 		return Result{}, err
 	}
 	prepared, err := service.prepare(ctx, request.Root, manifest, lock, record)

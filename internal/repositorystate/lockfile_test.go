@@ -100,3 +100,15 @@ func TestValidateLockfileRejectsIncompleteAndMultiplyOwnedArtifacts(t *testing.T
 		t.Fatal("expected multiply owned artifact rejection")
 	}
 }
+
+func TestValidateLockfileRejectsCommitsOnFileSources(t *testing.T) {
+	lock := Lockfile{Resolutions: []Resolution{{
+		Source:          SourceIdentity{Type: SourceTypeFile, Locator: "./x"},
+		ResolvedVersion: lockSnapshot("a"),
+		Commit:          strings.Repeat("a", 40),
+		Artifacts:       []ArtifactResolution{{Name: "a", Version: "1.0.0"}},
+	}}}
+	if ValidateLockfile(lock) == nil {
+		t.Fatal("expected file source commit rejection")
+	}
+}

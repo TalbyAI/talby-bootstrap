@@ -78,6 +78,10 @@ func TestValidateMaterializationRecordRejectsOwnerFilesPathsAndDigests(t *testin
 	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{badPath}}) == nil {
 		t.Fatal("expected non-canonical path rejection")
 	}
+	badPath.Files = []ManagedFileRecord{{Path: "../outside", Digest: digest}}
+	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{badPath}}) == nil {
+		t.Fatal("expected root escape rejection")
+	}
 	badDigest := valid
 	badDigest.Files = []ManagedFileRecord{{Path: "a", Digest: "sha256:" + strings.Repeat("A", 64)}}
 	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{badDigest}}) == nil {

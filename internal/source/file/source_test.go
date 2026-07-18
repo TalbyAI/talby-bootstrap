@@ -138,6 +138,29 @@ func TestResolveRejectsArtifactDescriptorSymlinkEscapingArtifactRoot(t *testing.
 	}
 }
 
+func TestEncodeDescriptorsIsDeterministicAndCanonical(t *testing.T) {
+	sourceBytes, err := EncodeSourceDescriptor(SourceDescriptor{Artifacts: []ArtifactReference{
+		{Name: "z", Path: "z"},
+		{Name: "a", Path: "a"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(sourceBytes), "schema_version: 1\nartifacts:\n  - name: a\n    path: a\n  - name: z\n    path: z\n"; got != want {
+		t.Fatalf("source descriptor = %q, want %q", got, want)
+	}
+	artifactBytes, err := EncodeArtifactDescriptor(ArtifactDescriptor{
+		Name: "a", Version: "1.0.0", Description: "example",
+		Steps: []ArtifactStep{{Type: "file", Path: "out", Source: "in"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(artifactBytes), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\n  description: example\nsteps:\n  - type: file\n    path: out\n    source: in\n"; got != want {
+		t.Fatalf("artifact descriptor = %q, want %q", got, want)
+	}
+}
+
 func TestCapabilitiesProvideIdentity(t *testing.T) {
 	if !New().Capabilities().ProvidesIdentity {
 		t.Fatal("file source must provide identity")

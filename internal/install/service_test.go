@@ -237,9 +237,34 @@ func TestInstallPropagatesStateLoadErrors(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsStateWithoutManifest(t *testing.T) {
+	root := t.TempDir()
+	if err := repositorystate.NewStore().WriteLockfile(context.Background(), root, repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{{
+		Source:          repositorystate.SourceIdentity{Type: "file", Locator: "./source"},
+		ResolvedVersion: testSnapshotVersion,
+		Artifacts:       []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"})
+	if err == nil || !strings.Contains(err.Error(), "require a manifest") {
+		t.Fatalf("Install() error = %v, want missing-manifest validation", err)
+	}
+	if impl.calls != 0 {
+		t.Fatalf("Resolve calls = %d, want 0", impl.calls)
+	}
+}
+
 func TestInstallRejectsMultipleLockedSnapshotsForSourceScope(t *testing.T) {
 	root := t.TempDir()
 	identity := repositorystate.SourceIdentity{Type: "file", Locator: "./source"}
+	if err := repositorystate.NewStore().WriteManifest(context.Background(), root, repositorystate.Manifest{Declarations: []repositorystate.Declaration{{
+		Source: identity,
+		Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeSource},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
 	lock := repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{
 		{Source: identity, ResolvedVersion: testSnapshotVersion, Artifacts: []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}}},
 		{Source: identity, ResolvedVersion: testSnapshotVersionB, Artifacts: []repositorystate.ArtifactResolution{{Name: "b", Version: "1.0.0"}}},

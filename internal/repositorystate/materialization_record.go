@@ -26,8 +26,13 @@ func ValidateMaterializationRecord(record MaterializationRecord) error {
 		if a.Source.Locator == "" || a.ResolvedVersion == "" || a.Artifact == "" || !isCanonicalSemVer(a.ArtifactVersion) {
 			return fmt.Errorf("complete managed artifact fields are required")
 		}
-		if a.Source.Type == SourceTypeFile && !isSHA256Digest(a.ResolvedVersion) {
-			return fmt.Errorf("file source version must be a sha256 digest")
+		if a.Source.Type == SourceTypeFile {
+			if !isSHA256Digest(a.ResolvedVersion) {
+				return fmt.Errorf("file source version must be a sha256 digest")
+			}
+			if a.Commit != "" {
+				return fmt.Errorf("file source must not contain a commit")
+			}
 		}
 		if a.Source.Type == SourceTypeGit && (!isCanonicalSemVer(a.ResolvedVersion) || !isGitCommit(a.Commit)) {
 			return fmt.Errorf("Git managed artifact requires canonical SemVer and full commit")
@@ -42,7 +47,8 @@ func ValidateMaterializationRecord(record MaterializationRecord) error {
 		}
 		for _, f := range a.Files {
 			native := filepath.FromSlash(f.Path)
-			if f.Path == "" || filepath.IsAbs(native) || filepath.ToSlash(filepath.Clean(native)) != f.Path {
+			clean := filepath.ToSlash(filepath.Clean(native))
+			if f.Path == "" || filepath.IsAbs(native) || clean != f.Path || f.Path == "." || f.Path == ".." || strings.HasPrefix(f.Path, "../") || strings.Contains(f.Path, "\\") {
 				return fmt.Errorf("managed file path must be canonical")
 			}
 			if !isSHA256Digest(f.Digest) {

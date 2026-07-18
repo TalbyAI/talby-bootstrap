@@ -112,3 +112,5 @@ func encodeYAML(value any) ([]byte, error) {
 	}
 	return bytes.ReplaceAll(buffer.Bytes(), []byte("\r\n"), []byte("\n")), nil
 }
+
+func EncodeYAML(value any) ([]byte, error) { return encodeYAML(value) }

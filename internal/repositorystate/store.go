@@ -256,6 +256,11 @@ func (fileStore) WriteLockfile(_ context.Context, root string, lockfile Lockfile
 	if err := ValidateLockfile(lockfile); err != nil {
 		return err
 	}
+	for _, resolution := range lockfile.Resolutions {
+		if err := validateCanonicalStateSource(root, resolution.Source); err != nil {
+			return fmt.Errorf("lockfile resolution source: %w", err)
+		}
+	}
 
 	doc := lockfileDocument{
 		SchemaVersion: supportedSchemaVersion,
@@ -332,6 +337,11 @@ func (fileStore) LoadMaterializationRecord(_ context.Context, root string) (Mate
 func (fileStore) WriteMaterializationRecord(_ context.Context, root string, record MaterializationRecord) error {
 	if err := ValidateMaterializationRecord(record); err != nil {
 		return err
+	}
+	for _, artifact := range record.Artifacts {
+		if err := validateCanonicalStateSource(root, artifact.Source); err != nil {
+			return fmt.Errorf("managed artifact source: %w", err)
+		}
 	}
 
 	doc := materializationRecordDocument{
@@ -472,4 +482,15 @@ func canonicalSourceReference(root, raw string) (SourceIdentity, error) {
 		return SourceIdentity{}, fmt.Errorf("source reference is not canonical")
 	}
 	return normalized, nil
+}
+
+func validateCanonicalStateSource(root string, source SourceIdentity) error {
+	normalized, err := NormalizeSourceIdentity(root, source)
+	if err != nil {
+		return err
+	}
+	if normalized != source {
+		return fmt.Errorf("source locator is not normalized")
+	}
+	return nil
 }

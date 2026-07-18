@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
@@ -50,10 +51,65 @@ type artifactStep struct {
 	Source string `yaml:"source"`
 }
 
+type SourceDescriptor struct {
+	Artifacts []ArtifactReference
+}
+
+type ArtifactReference struct {
+	Name string
+	Path string
+}
+
+type ArtifactDescriptor struct {
+	Name        string
+	Version     string
+	Description string
+	Steps       []ArtifactStep
+}
+
+type ArtifactStep struct {
+	Type   string
+	Path   string
+	Source string
+}
+
 type Source struct{}
 
 func New() Source                                { return Source{} }
 func (Source) Capabilities() source.Capabilities { return source.Capabilities{ProvidesIdentity: true} }
+
+func EncodeSourceDescriptor(value SourceDescriptor) ([]byte, error) {
+	artifacts := append([]ArtifactReference(nil), value.Artifacts...)
+	sort.Slice(artifacts, func(i, j int) bool {
+		if artifacts[i].Name != artifacts[j].Name {
+			return artifacts[i].Name < artifacts[j].Name
+		}
+		return artifacts[i].Path < artifacts[j].Path
+	})
+	descriptor := sourceDescriptor{SchemaVersion: supportedSchemaVersion, Artifacts: make([]artifactRef, 0, len(artifacts))}
+	for _, artifact := range artifacts {
+		descriptor.Artifacts = append(descriptor.Artifacts, artifactRef{Name: artifact.Name, Path: artifact.Path})
+	}
+	if err := validateSourceDescriptor(descriptor); err != nil {
+		return nil, err
+	}
+	return repositorystate.EncodeYAML(descriptor)
+}
+
+func EncodeArtifactDescriptor(value ArtifactDescriptor) ([]byte, error) {
+	descriptor := artifactDescriptor{SchemaVersion: supportedSchemaVersion}
+	descriptor.Artifact.Name = value.Name
+	descriptor.Artifact.Version = value.Version
+	descriptor.Artifact.Description = value.Description
+	descriptor.Steps = make([]artifactStep, 0, len(value.Steps))
+	for _, step := range value.Steps {
+		descriptor.Steps = append(descriptor.Steps, artifactStep{Type: step.Type, Path: step.Path, Source: step.Source})
+	}
+	if err := validateArtifactDescriptor(artifactRef{Name: value.Name}, descriptor); err != nil {
+		return nil, err
+	}
+	return repositorystate.EncodeYAML(descriptor)
+}
 
 func writeSnapshotField(snapshot hash.Hash, value []byte) {
 	var size [8]byte

@@ -214,6 +214,28 @@ func TestStoreRejectsInvalidDomainValuesBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestStoreRejectsNonCanonicalStateSourceLocators(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore()
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
+	if err := store.WriteLockfile(context.Background(), root, Lockfile{Resolutions: []Resolution{{
+		Source:          source,
+		ResolvedVersion: testSnapshot("a"),
+		Artifacts:       []ArtifactResolution{{Name: "a", Version: "1.0.0"}},
+	}}}); err == nil {
+		t.Fatal("expected non-canonical lockfile source rejection")
+	}
+	if err := store.WriteMaterializationRecord(context.Background(), root, MaterializationRecord{Artifacts: []ManagedArtifactRecord{{
+		Source:          source,
+		ResolvedVersion: testSnapshot("a"),
+		Artifact:        "a",
+		ArtifactVersion: "1.0.0",
+		Files:           []ManagedFileRecord{{Path: "a", Digest: testSnapshot("b")}},
+	}}}); err == nil {
+		t.Fatal("expected non-canonical materialization source rejection")
+	}
+}
+
 func TestStoreWriteReportsMissingRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing")
 	store := NewStore()
