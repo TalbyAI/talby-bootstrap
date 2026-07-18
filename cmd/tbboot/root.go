@@ -97,40 +97,6 @@ func newRootCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 	}
 	root.AddCommand(
 		installCommand(ctx, opts, stdout),
-		placeholderCommand(ctx, opts, stdout, "upgrade", nil, "Upgrade declared artifacts"),
-		placeholderCommand(ctx, opts, stdout, "search", nil, "Search configured catalogs"),
-		placeholderCommand(ctx, opts, stdout, "logs", nil, "Replay recorded operations"),
-		catalogCommand(ctx, opts, stdout),
 	)
 	return root
-}
-
-func catalogCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "catalog",
-		Short: "Manage catalogs",
-	}
-	cmd.AddCommand(
-		placeholderCommand(ctx, opts, stdout, "add", nil, "Add a catalog"),
-		placeholderCommand(ctx, opts, stdout, "list", nil, "List catalogs"),
-		placeholderCommand(ctx, opts, stdout, "refresh", nil, "Refresh catalog caches"),
-		placeholderCommand(ctx, opts, stdout, "remove", nil, "Remove a catalog"),
-	)
-	return cmd
-}
-
-func placeholderCommand(ctx context.Context, opts *options, stdout io.Writer, use string, aliases []string, short string) *cobra.Command {
-	return &cobra.Command{
-		Use:     use,
-		Aliases: aliases,
-		Short:   short,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			result := app.Success("not implemented")
-			if opts.output == outputJSON {
-				return json.NewEncoder(stdout).Encode(result)
-			}
-			_, err := fmt.Fprintln(stdout, result.Message)
-			return err
-		},
-	}
 }

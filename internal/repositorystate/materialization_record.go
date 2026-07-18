@@ -20,8 +20,22 @@ func ValidateMaterializationRecord(record MaterializationRecord) error {
 	owners := map[ArtifactKey]struct{}{}
 	paths := map[string]struct{}{}
 	for _, a := range record.Artifacts {
-		if a.Source.Type == "" || a.Source.Locator == "" || a.ResolvedVersion == "" || a.Artifact == "" || a.ArtifactVersion == "" {
+		if a.Source.Type != SourceTypeFile && a.Source.Type != SourceTypeGit {
+			return fmt.Errorf("unsupported source type %q", a.Source.Type)
+		}
+		if a.Source.Locator == "" || a.ResolvedVersion == "" || a.Artifact == "" || !isCanonicalSemVer(a.ArtifactVersion) {
 			return fmt.Errorf("complete managed artifact fields are required")
+		}
+		if a.Source.Type == SourceTypeFile {
+			if !isSHA256Digest(a.ResolvedVersion) {
+				return fmt.Errorf("file source version must be a sha256 digest")
+			}
+			if a.Commit != "" {
+				return fmt.Errorf("file source must not contain a commit")
+			}
+		}
+		if a.Source.Type == SourceTypeGit && (!isCanonicalSemVer(a.ResolvedVersion) || !isGitCommit(a.Commit)) {
+			return fmt.Errorf("Git managed artifact requires canonical SemVer and full commit")
 		}
 		k := ManagedArtifactKey(a)
 		if _, ok := owners[k]; ok {
@@ -33,11 +47,12 @@ func ValidateMaterializationRecord(record MaterializationRecord) error {
 		}
 		for _, f := range a.Files {
 			native := filepath.FromSlash(f.Path)
-			if f.Path == "" || filepath.IsAbs(native) || filepath.ToSlash(filepath.Clean(native)) != f.Path {
+			clean := filepath.ToSlash(filepath.Clean(native))
+			if f.Path == "" || filepath.IsAbs(native) || clean != f.Path || f.Path == "." || f.Path == ".." || strings.HasPrefix(f.Path, "../") || strings.Contains(f.Path, "\\") || (len(f.Path) >= 2 && f.Path[1] == ':' && ((f.Path[0] >= 'A' && f.Path[0] <= 'Z') || (f.Path[0] >= 'a' && f.Path[0] <= 'z'))) {
 				return fmt.Errorf("managed file path must be canonical")
 			}
-			if len(f.Digest) != 64 || strings.Trim(f.Digest, "0123456789abcdef") != "" {
-				return fmt.Errorf("managed file digest must be a lowercase hex sha256")
+			if !isSHA256Digest(f.Digest) {
+				return fmt.Errorf("managed file digest must be a sha256 digest")
 			}
 			key := managedPathKey(f.Path)
 			if _, ok := paths[key]; ok {

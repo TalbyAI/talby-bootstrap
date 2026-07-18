@@ -44,12 +44,15 @@ func (service Service) Sync(ctx context.Context, request SyncRequest) (Result, e
 	if err != nil {
 		return Result{}, err
 	}
-	lock, err := service.loadLockfileOrEmpty(ctx, request.Root)
+	lock, _, err := service.loadLockfile(ctx, request.Root)
 	if err != nil {
 		return Result{}, err
 	}
-	record, err := service.loadMaterializationRecordOrEmpty(ctx, request.Root)
+	record, _, err := service.loadMaterializationRecord(ctx, request.Root)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := repositorystate.ValidateCrossDocumentState(lock, record); err != nil {
 		return Result{}, err
 	}
 	prepared, err := service.prepare(ctx, request.Root, manifest, lock, record)
@@ -240,8 +243,9 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 		for i, step := range artifact.Descriptor.Steps {
 			observed := observations[i]
 			path := materialize.PathKey(observed.AbsolutePath)
-			for _, name := range []string{repositorystate.ManifestFileName, repositorystate.LockfileFileName, repositorystate.MaterializationRecordFileName} {
-				if observed.Path == name {
+			relativePath := materialize.PathKey(filepath.FromSlash(observed.Path))
+			for _, name := range []string{repositorystate.ManifestFileName, repositorystate.LockfileFileName, repositorystate.MaterializationRecordFileName, repositorystate.RecoveryStateFileName} {
+				if relativePath == materialize.PathKey(filepath.FromSlash(name)) {
 					return nil, nil, fmt.Errorf("target %q is reserved", step.TargetPath)
 				}
 			}
@@ -255,7 +259,7 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 			claimed[path] = artifact
 			digest := materialize.Digest(step.SourceBytes)
 			change := ChangeFileCreated
-			ownerKey := materialize.PathKey(filepath.FromSlash(observed.Path))
+			ownerKey := relativePath
 			if owner, ok := owners[ownerKey]; ok && owner != artifact.Key {
 				conflicts = append(conflicts, Conflict{Kind: ConflictOwnership, Source: artifact.Key.Source, Artifact: artifact.Key.Name, Paths: []string{observed.Path}})
 				continue

@@ -16,38 +16,38 @@ import (
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
 )
 
-func TestHelpIncludesV1CommandSurfaces(t *testing.T) {
+func TestHelpIncludesOnlyImplementedCommandSurface(t *testing.T) {
 	var stdout bytes.Buffer
 	if code := execute(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	for _, want := range []string{"install", "upgrade", "search", "logs", "catalog"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("help output missing %q", want)
+	if !strings.Contains(stdout.String(), "install") {
+		t.Fatal("help output missing install")
+	}
+	for _, removed := range []string{"upgrade", "search", "logs", "catalog"} {
+		if strings.Contains(stdout.String(), removed) {
+			t.Fatalf("help output contains removed command %q", removed)
 		}
 	}
 }
 
-func TestPlaceholderCommandsRenderHumanAndJSON(t *testing.T) {
-	for _, args := range [][]string{{"upgrade"}, {"catalog", "list"}} {
+func TestRemovedCommandsDoNotReportSuccessfulPlaceholders(t *testing.T) {
+	for _, args := range [][]string{{"upgrade"}, {"catalog", "list"}, {"search"}, {"logs"}} {
 		var stdout bytes.Buffer
-		if code := execute(context.Background(), args, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) || strings.TrimSpace(stdout.String()) != "not implemented" {
+		if code := execute(context.Background(), args, &stdout, &bytes.Buffer{}); code == int(app.ExitSuccess) || strings.Contains(stdout.String(), "not implemented") {
 			t.Fatalf("execute(%v) = %d, %q", args, code, stdout.String())
 		}
 	}
 	var stdout bytes.Buffer
-	if code := execute(context.Background(), []string{"--output", "json", "search"}, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) {
-		t.Fatalf("JSON exit code = %d", code)
-	}
-	var result app.Result
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result.Message != "not implemented" {
-		t.Fatalf("JSON result = %#v, %v", result, err)
+	var stderr bytes.Buffer
+	if code := execute(context.Background(), []string{"--output", "json", "search"}, &stdout, &stderr); code == int(app.ExitSuccess) {
+		t.Fatalf("JSON exit code = %d, stderr=%q", code, stderr.String())
 	}
 }
 
 func TestUnsupportedOutputModeReportsHumanError(t *testing.T) {
 	var stderr bytes.Buffer
-	if code := execute(context.Background(), []string{"--output", "xml", "search"}, &bytes.Buffer{}, &stderr); code != int(app.ExitOperationalOrValidationError) {
+	if code := execute(context.Background(), []string{"--output", "xml", "install"}, &bytes.Buffer{}, &stderr); code != int(app.ExitOperationalOrValidationError) {
 		t.Fatalf("exit code = %d", code)
 	}
 	if !strings.Contains(stderr.String(), `unsupported output mode "xml"`) {
@@ -137,12 +137,11 @@ func TestSyncJSONIncludesTypedEffectiveChanges(t *testing.T) {
 			if !ok {
 				t.Fatalf("change = %#v, want object", raw)
 			}
-			source, ok := change["source"].(map[string]any)
-			locator, locatorOK := source["locator"].(string)
+			source, sourceOK := change["source"].(string)
 			sourceVersion, versionOK := change["source_version"].(string)
 			artifact, artifactOK := change["artifact"].(string)
 			kind, kindOK := change["kind"].(string)
-			if !ok || source["type"] != "file" || !locatorOK || locator == "" || !versionOK || sourceVersion == "" || !artifactOK || artifact != "base-readme" || !kindOK {
+			if !sourceOK || !strings.HasPrefix(source, "file:") || !versionOK || sourceVersion == "" || !artifactOK || artifact != "base-readme" || !kindOK {
 				t.Fatalf("change provenance = %#v", change)
 			}
 			seen[kind] = true
@@ -165,8 +164,8 @@ func TestSyncJSONIncludesTypedEffectiveChanges(t *testing.T) {
 func TestChangeProvenanceInHumanAndJSONOutput(t *testing.T) {
 	change := installsvc.Change{
 		Kind:          installsvc.ChangeFileCreated,
-		Source:        repositorystate.SourceIdentity{Type: "file", Locator: "source"},
-		SourceVersion: "snapshot",
+		Source:        repositorystate.SourceIdentity{Type: "file", Locator: "./source"},
+		SourceVersion: "sha256:" + strings.Repeat("a", 64),
 		Artifact:      "a",
 		Path:          "a.txt",
 		OwnershipKind: installsvc.OwnershipWholeFile,
@@ -176,7 +175,7 @@ func TestChangeProvenanceInHumanAndJSONOutput(t *testing.T) {
 	if err := writeResult(&human, result); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"source_version=snapshot", "ownership_kind=whole_file"} {
+	for _, want := range []string{"source_version=sha256:" + strings.Repeat("a", 64), "ownership_kind=whole_file"} {
 		if !strings.Contains(human.String(), want) {
 			t.Fatalf("human output = %q, want %q", human.String(), want)
 		}
@@ -185,7 +184,7 @@ func TestChangeProvenanceInHumanAndJSONOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"source_version":"snapshot"`, `"ownership_kind":"whole_file"`} {
+	for _, want := range []string{`"source_version":"sha256:` + strings.Repeat("a", 64) + `"`, `"ownership_kind":"whole_file"`} {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Fatalf("JSON = %s, want %s", data, want)
 		}
@@ -223,11 +222,10 @@ func TestSyncJSONIncludesAllTypedConflictsOnStderr(t *testing.T) {
 			if !ok {
 				t.Fatalf("conflict = %#v, want object", raw)
 			}
-			source, ok := conflict["source"].(map[string]any)
+			source, sourceOK := conflict["source"].(string)
 			paths, pathsOK := conflict["paths"].([]any)
-			locator, locatorOK := source["locator"].(string)
 			artifact, artifactOK := conflict["artifact"].(string)
-			if conflict["kind"] != "drift" || !ok || source["type"] != "file" || !locatorOK || locator == "" || !artifactOK || artifact != "base-readme" || !pathsOK || len(paths) == 0 {
+			if conflict["kind"] != "drift" || !sourceOK || !strings.HasPrefix(source, "file:") || !artifactOK || artifact != "base-readme" || !pathsOK || len(paths) == 0 {
 				t.Fatalf("conflict fields = %#v", conflict)
 			}
 			for _, path := range paths {
@@ -295,9 +293,9 @@ func TestSyncJSONSortsDeniedSources(t *testing.T) {
 		if !ok || len(denied) != 2 {
 			t.Fatalf("denied_sources = %#v", result.Details["denied_sources"])
 		}
-		firstSource := denied[0].(map[string]any)
-		secondSource := denied[1].(map[string]any)
-		if firstSource["locator"] != first || secondSource["locator"] != second {
+		firstSource, firstOK := denied[0].(string)
+		secondSource, secondOK := denied[1].(string)
+		if !firstOK || !secondOK || strings.TrimPrefix(firstSource, "file:") != first || strings.TrimPrefix(secondSource, "file:") != second {
 			t.Fatalf("denied_sources = %#v, want sorted locators", denied)
 		}
 	})
@@ -427,7 +425,7 @@ func TestJSONOutputErrorsGoToStderrAsJSON(t *testing.T) {
 	if err := json.Unmarshal(stderr.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Message != "source must be formatted as <type>:<locator>" {
+	if result.Message != "source reference must be formatted as <type>:<locator>" {
 		t.Fatalf("message = %q", result.Message)
 	}
 }
@@ -458,13 +456,13 @@ func writeTwoArtifactFixture(t *testing.T, root string) {
 	t.Helper()
 	writeInstallFixture(t, root)
 	writeFixture(t, root, "second", "SECOND.md", "second\n")
-	writeTestFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n  - name: second\n    path: artifacts/second\n")
+	writeTestFile(t, filepath.Join(root, "tbboot-source.yaml"), "schema_version: 1\nartifacts:\n  - name: base-readme\n    path: artifacts/base-readme\n  - name: second\n    path: artifacts/second\n")
 }
 
 func writeFixture(t *testing.T, root, artifact, target, contents string) {
 	t.Helper()
-	writeTestFile(t, filepath.Join(root, "talby-source.yaml"), "schema_version: 1\nsource:\n  name: local-example-source\nartifacts:\n  - name: "+artifact+"\n    path: artifacts/"+artifact+"\n")
-	writeTestFile(t, filepath.Join(root, "artifacts", artifact, "talby-artifact.yaml"), "schema_version: 1\nartifact:\n  name: "+artifact+"\n  version: 1.0.0\nsteps:\n  - type: file\n    path: "+target+"\n    source: "+target+"\n")
+	writeTestFile(t, filepath.Join(root, "tbboot-source.yaml"), "schema_version: 1\nartifacts:\n  - name: "+artifact+"\n    path: artifacts/"+artifact+"\n")
+	writeTestFile(t, filepath.Join(root, "artifacts", artifact, "tbboot-artifact.yaml"), "schema_version: 1\nartifact:\n  name: "+artifact+"\n  version: 1.0.0\nsteps:\n  - type: file\n    path: "+target+"\n    source: "+target+"\n")
 	writeTestFile(t, filepath.Join(root, "artifacts", artifact, target), contents)
 }
 

@@ -1,0 +1,7 @@
+schema_version: 1
+resolutions:
+  - source: file:./.tbboot-example/sources/local-example-source
+    source_version: sha256:3b291688ffd27d879adf6458c9c245cf45770b4d63660c35725f14ea264fd04a
+    artifacts:
+      - name: base-readme
+        version: 1.0.0

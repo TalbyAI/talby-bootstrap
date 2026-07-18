@@ -118,8 +118,24 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 	if err != nil {
 		return Result{}, err
 	}
-	manifest, err := service.loadManifestOrEmpty(ctx, request.Root)
+	manifest, manifestPresent, err := service.loadManifest(ctx, request.Root)
 	if err != nil {
+		return Result{}, err
+	}
+	var lock repositorystate.Lockfile
+	var record repositorystate.MaterializationRecord
+	lock, lockPresent, err := service.loadLockfile(ctx, request.Root)
+	if err != nil {
+		return Result{}, err
+	}
+	record, recordPresent, err := service.loadMaterializationRecord(ctx, request.Root)
+	if err != nil {
+		return Result{}, err
+	}
+	if !manifestPresent && (lockPresent || recordPresent) {
+		return Result{}, fmt.Errorf("lockfile and materialization record require a manifest")
+	}
+	if err := repositorystate.ValidateCrossDocumentState(lock, record); err != nil {
 		return Result{}, err
 	}
 	declaration := declarationFor(request, identity)
@@ -155,14 +171,6 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 			return Result{}, err
 		}
 		return Result{Operation: "install", Outcome: OutcomeApplied, ArtifactCount: len(selected), Changes: []Change{{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact}}}, nil
-	}
-	lock, err := service.loadLockfileOrEmpty(ctx, request.Root)
-	if err != nil {
-		return Result{}, err
-	}
-	record, err := service.loadMaterializationRecordOrEmpty(ctx, request.Root)
-	if err != nil {
-		return Result{}, err
 	}
 	var locked *repositorystate.Resolution
 	if declaration.Target.Scope == repositorystate.DeclarationScopeArtifact {
@@ -229,26 +237,26 @@ func selectedArtifacts(resolved source.ResolvedSource, target repositorystate.De
 	}
 	return nil, fmt.Errorf("artifact %q was not found", target.Artifact)
 }
-func (service Service) loadManifestOrEmpty(ctx context.Context, root string) (repositorystate.Manifest, error) {
+func (service Service) loadManifest(ctx context.Context, root string) (repositorystate.Manifest, bool, error) {
 	m, err := service.store.LoadManifest(ctx, root)
 	if stateNotFound(err, repositorystate.StateFileManifest) {
-		return repositorystate.Manifest{}, nil
+		return repositorystate.Manifest{}, false, nil
 	}
-	return m, err
+	return m, err == nil, err
 }
-func (service Service) loadLockfileOrEmpty(ctx context.Context, root string) (repositorystate.Lockfile, error) {
+func (service Service) loadLockfile(ctx context.Context, root string) (repositorystate.Lockfile, bool, error) {
 	v, err := service.store.LoadLockfile(ctx, root)
 	if stateNotFound(err, repositorystate.StateFileLockfile) {
-		return repositorystate.Lockfile{}, nil
+		return repositorystate.Lockfile{}, false, nil
 	}
-	return v, err
+	return v, err == nil, err
 }
-func (service Service) loadMaterializationRecordOrEmpty(ctx context.Context, root string) (repositorystate.MaterializationRecord, error) {
+func (service Service) loadMaterializationRecord(ctx context.Context, root string) (repositorystate.MaterializationRecord, bool, error) {
 	v, err := service.store.LoadMaterializationRecord(ctx, root)
 	if stateNotFound(err, repositorystate.StateFileMaterializationRecord) {
-		return repositorystate.MaterializationRecord{}, nil
+		return repositorystate.MaterializationRecord{}, false, nil
 	}
-	return v, err
+	return v, err == nil, err
 }
 func stateNotFound(err error, file repositorystate.StateFile) bool {
 	var e repositorystate.StateFileError

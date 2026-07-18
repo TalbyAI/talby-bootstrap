@@ -221,7 +221,7 @@ func TestPathKeyDigestAndErrorText(t *testing.T) {
 	if got := PathKey("a/../b"); got != "b" {
 		t.Fatalf("PathKey() = %q", got)
 	}
-	if got := Digest([]byte("content")); len(got) != 64 || strings.Trim(got, "0123456789abcdef") != "" {
+	if got := Digest([]byte("content")); len(got) != len("sha256:")+64 || !strings.HasPrefix(got, "sha256:") || strings.Trim(got[len("sha256:"):], "0123456789abcdef") != "" {
 		t.Fatalf("Digest() = %q", got)
 	}
 	if got := (ChangedSincePreflightError{Path: "a"}).Error(); got != `target "a" changed after preflight` {

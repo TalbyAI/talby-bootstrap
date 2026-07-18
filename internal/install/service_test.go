@@ -19,6 +19,11 @@ type testSource struct {
 	resolve  func(source.ResolveRequest) (source.ResolvedSource, error)
 }
 
+var (
+	testSnapshotVersion  = "sha256:" + strings.Repeat("a", 64)
+	testSnapshotVersionB = "sha256:" + strings.Repeat("b", 64)
+)
+
 func (s *testSource) Capabilities() source.Capabilities { return source.Capabilities{} }
 func (s *testSource) Resolve(_ context.Context, request source.ResolveRequest) (source.ResolvedSource, error) {
 	s.calls++
@@ -35,22 +40,22 @@ func testService(resolved source.ResolvedSource) (Service, *testSource) {
 }
 
 func testResolved(artifacts ...source.ArtifactDescriptor) source.ResolvedSource {
-	return source.ResolvedSource{Identity: source.Identity{Version: "snapshot"}, Artifacts: artifacts}
+	return source.ResolvedSource{Identity: source.Identity{Version: testSnapshotVersion}, Artifacts: artifacts}
 }
 
 func testArtifact(name, target string) source.ArtifactDescriptor {
-	return source.ArtifactDescriptor{Name: name, Version: "1", Steps: []source.MaterializationStep{{Type: "file", TargetPath: target, SourceBytes: []byte(name)}}}
+	return source.ArtifactDescriptor{Name: name, Version: "1.0.0", Steps: []source.MaterializationStep{{Type: "file", TargetPath: target, SourceBytes: []byte(name)}}}
 }
 
 func TestInstallMixedScopeReturnsTypedIntentConflict(t *testing.T) {
 	root := t.TempDir()
 	store := repositorystate.NewStore()
-	manifest := repositorystate.Manifest{Declarations: []repositorystate.Declaration{{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeSource}}}}
+	manifest := repositorystate.Manifest{Declarations: []repositorystate.Declaration{{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeSource}}}}
 	if err := store.WriteManifest(context.Background(), root, manifest); err != nil {
 		t.Fatal(err)
 	}
 	service, _ := testService(testResolved(testArtifact("a", "a")))
-	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "a"})
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"})
 	var conflict UserActionError
 	if !errors.As(err, &conflict) || conflict.Result.Conflicts[0].Kind != ConflictIntent {
 		t.Fatalf("Install() error = %T %v", err, err)
@@ -60,13 +65,12 @@ func TestInstallMixedScopeReturnsTypedIntentConflict(t *testing.T) {
 func TestInstallChangedInputReturnsTypedIntentConflict(t *testing.T) {
 	root := t.TempDir()
 	service, _ := testService(testResolved(testArtifact("a", "a")))
-	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}, DeclareOnly: true}); err != nil {
+	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, DeclareOnly: true}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, DeclareOnly: true})
-	var conflict UserActionError
-	if !errors.As(err, &conflict) || conflict.Result.Conflicts[0].Kind != ConflictIntent {
-		t.Fatalf("Install() error = %T %v", err, err)
+	result, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, DeclareOnly: true})
+	if err != nil || result.Outcome != OutcomeNoOp {
+		t.Fatalf("Install() result = %#v, error = %v", result, err)
 	}
 }
 
@@ -74,7 +78,7 @@ func TestInstallPreservesOtherLockedAndManagedDeclarations(t *testing.T) {
 	root := t.TempDir()
 	service, _ := testService(testResolved(testArtifact("a", "a"), testArtifact("b", "b")))
 	for _, artifact := range []string{"a", "b"} {
-		if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: artifact}); err != nil {
+		if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: artifact}); err != nil {
 			t.Fatalf("Install(%s) error = %v", artifact, err)
 		}
 	}
@@ -94,14 +98,49 @@ func TestInstallPreservesOtherLockedAndManagedDeclarations(t *testing.T) {
 
 func TestDeclareOnlyUnsupportedStepAcceptanceAndNoOpWithoutResolve(t *testing.T) {
 	root := t.TempDir()
-	service, impl := testService(testResolved(source.ArtifactDescriptor{Name: "a", Version: "1", Steps: []source.MaterializationStep{{Type: "prompt", TargetPath: "ignored"}}}))
-	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "a", DeclareOnly: true}); err != nil {
+	service, impl := testService(testResolved(source.ArtifactDescriptor{Name: "a", Version: "1.0.0", Steps: []source.MaterializationStep{{Type: "prompt", TargetPath: "ignored"}}}))
+	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a", DeclareOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	impl.calls = 0
-	result, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "a", DeclareOnly: true})
+	result, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a", DeclareOnly: true})
 	if err != nil || result.Outcome != OutcomeNoOp || impl.calls != 0 {
 		t.Fatalf("repeat = %#v, %v, calls=%d", result, err, impl.calls)
+	}
+}
+
+func TestDeclareOnlyPropagatesLockfileLoadError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, repositorystate.LockfileFileName), []byte("schema_version: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a", DeclareOnly: true})
+	if err == nil {
+		t.Fatal("expected lockfile load error")
+	}
+	if impl.calls != 0 {
+		t.Fatalf("resolve calls = %d, want 0", impl.calls)
+	}
+}
+
+func TestDeclareOnlyRejectsStateWithoutManifest(t *testing.T) {
+	root := t.TempDir()
+	lock := repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{{
+		Source:          repositorystate.SourceIdentity{Type: "file", Locator: "./source"},
+		ResolvedVersion: testSnapshotVersion,
+		Artifacts:       []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}},
+	}}}
+	if err := repositorystate.NewStore().WriteLockfile(context.Background(), root, lock); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a", DeclareOnly: true})
+	if err == nil || !strings.Contains(err.Error(), "require a manifest") {
+		t.Fatalf("Install() error = %v, want missing-manifest validation", err)
+	}
+	if impl.calls != 0 {
+		t.Fatalf("resolve calls = %d, want 0", impl.calls)
 	}
 }
 
@@ -117,7 +156,7 @@ func TestInstallValidatesRequest(t *testing.T) {
 	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file"}}); err == nil || !strings.Contains(err.Error(), "source locator") {
 		t.Fatalf("locator error = %v", err)
 	}
-	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source", Version: "v1"}}); err == nil || !strings.Contains(err.Error(), "requested source versions") {
+	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source", Version: "v1"}}); err == nil || !strings.Contains(err.Error(), "requested source versions") {
 		t.Fatalf("version error = %v", err)
 	}
 }
@@ -152,7 +191,7 @@ func TestSelectedArtifactsHandlesSourceAndArtifactScopes(t *testing.T) {
 }
 
 func TestTrustApprovalAndRootClassification(t *testing.T) {
-	identity := repositorystate.SourceIdentity{Type: "file", Locator: "source"}
+	identity := repositorystate.SourceIdentity{Type: "file", Locator: "./source"}
 	if approved(repositorystate.TrustPolicy{}, identity) {
 		t.Fatal("unexpected approval")
 	}
@@ -167,13 +206,13 @@ func TestTrustApprovalAndRootClassification(t *testing.T) {
 func TestInstallRejectsMissingArtifactAndResolutionFailure(t *testing.T) {
 	root := t.TempDir()
 	service, impl := testService(testResolved(testArtifact("a", "a")))
-	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "missing"}); err == nil {
+	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "missing"}); err == nil {
 		t.Fatal("expected missing artifact")
 	}
 	impl.resolve = func(source.ResolveRequest) (source.ResolvedSource, error) {
 		return source.ResolvedSource{}, errors.New("resolve failed")
 	}
-	if _, err := service.Install(context.Background(), Request{Root: t.TempDir(), Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "a"}); err == nil || err.Error() != "resolve failed" {
+	if _, err := service.Install(context.Background(), Request{Root: t.TempDir(), Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"}); err == nil || err.Error() != "resolve failed" {
 		t.Fatalf("resolve error = %v", err)
 	}
 }
@@ -197,9 +236,9 @@ func TestInstallEnforcesAndAcceptsExternalSourceTrust(t *testing.T) {
 }
 
 func TestInstallPropagatesStateLoadErrors(t *testing.T) {
-	service, _ := testService(testResolved(testArtifact("a", "a")))
+	service, impl := testService(testResolved(testArtifact("a", "a")))
 	request := func(root string) Request {
-		return Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "a"}
+		return Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"}
 	}
 	manifestRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(manifestRoot, repositorystate.ManifestFileName), []byte("schema_version: ["), 0o644); err != nil {
@@ -208,12 +247,18 @@ func TestInstallPropagatesStateLoadErrors(t *testing.T) {
 	if _, err := service.Install(context.Background(), request(manifestRoot)); err == nil {
 		t.Fatal("expected manifest load error")
 	}
+	if impl.calls != 0 {
+		t.Fatalf("resolve calls after manifest error = %d, want 0", impl.calls)
+	}
 	lockRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(lockRoot, repositorystate.LockfileFileName), []byte("schema_version: ["), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.Install(context.Background(), request(lockRoot)); err == nil {
 		t.Fatal("expected lockfile load error")
+	}
+	if impl.calls != 0 {
+		t.Fatalf("resolve calls after lockfile error = %d, want 0", impl.calls)
 	}
 	recordRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(recordRoot, repositorystate.MaterializationRecordFileName), []byte("schema_version: ["), 0o644); err != nil {
@@ -222,20 +267,48 @@ func TestInstallPropagatesStateLoadErrors(t *testing.T) {
 	if _, err := service.Install(context.Background(), request(recordRoot)); err == nil {
 		t.Fatal("expected materialization record load error")
 	}
+	if impl.calls != 0 {
+		t.Fatalf("resolve calls after materialization record error = %d, want 0", impl.calls)
+	}
+}
+
+func TestInstallRejectsStateWithoutManifest(t *testing.T) {
+	root := t.TempDir()
+	if err := repositorystate.NewStore().WriteLockfile(context.Background(), root, repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{{
+		Source:          repositorystate.SourceIdentity{Type: "file", Locator: "./source"},
+		ResolvedVersion: testSnapshotVersion,
+		Artifacts:       []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"})
+	if err == nil || !strings.Contains(err.Error(), "require a manifest") {
+		t.Fatalf("Install() error = %v, want missing-manifest validation", err)
+	}
+	if impl.calls != 0 {
+		t.Fatalf("Resolve calls = %d, want 0", impl.calls)
+	}
 }
 
 func TestInstallRejectsMultipleLockedSnapshotsForSourceScope(t *testing.T) {
 	root := t.TempDir()
-	identity := repositorystate.SourceIdentity{Type: "file", Locator: "source"}
+	identity := repositorystate.SourceIdentity{Type: "file", Locator: "./source"}
+	if err := repositorystate.NewStore().WriteManifest(context.Background(), root, repositorystate.Manifest{Declarations: []repositorystate.Declaration{{
+		Source: identity,
+		Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeSource},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
 	lock := repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{
-		{Source: identity, ResolvedVersion: "v1", Artifacts: []repositorystate.ArtifactResolution{{Name: "a", Version: "1"}}},
-		{Source: identity, ResolvedVersion: "v2", Artifacts: []repositorystate.ArtifactResolution{{Name: "b", Version: "1"}}},
+		{Source: identity, ResolvedVersion: testSnapshotVersion, Artifacts: []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}}},
+		{Source: identity, ResolvedVersion: testSnapshotVersionB, Artifacts: []repositorystate.ArtifactResolution{{Name: "b", Version: "1.0.0"}}},
 	}}
 	if err := repositorystate.NewStore().WriteLockfile(context.Background(), root, lock); err != nil {
 		t.Fatal(err)
 	}
 	service, _ := testService(testResolved(testArtifact("a", "a"), testArtifact("b", "b")))
-	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}})
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}})
 	if err == nil || !strings.Contains(err.Error(), "multiple locked snapshots") {
 		t.Fatalf("Install() error = %v", err)
 	}
@@ -244,11 +317,11 @@ func TestInstallRejectsMultipleLockedSnapshotsForSourceScope(t *testing.T) {
 func TestInstallRejectsUnsupportedAndUnregisteredSources(t *testing.T) {
 	root := t.TempDir()
 	service, _ := testService(testResolved())
-	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "git", Locator: "source"}}); err == nil {
+	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "git", Locator: "./source"}}); err == nil {
 		t.Fatal("expected unsupported source")
 	}
 	service = NewService(source.NewStaticRegistry(nil), repositorystate.NewStore())
-	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}}); err == nil {
+	if _, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}}); err == nil {
 		t.Fatal("expected unregistered source")
 	}
 }
@@ -256,18 +329,18 @@ func TestInstallRejectsUnsupportedAndUnregisteredSources(t *testing.T) {
 func TestInstallRejectsLockedMismatchUnsupportedStepAndFileConflict(t *testing.T) {
 	root := t.TempDir()
 	service, impl := testService(testResolved(testArtifact("a", "a")))
-	request := Request{Root: root, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "a"}
+	request := Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"}
 	if _, err := service.Install(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
-	impl.resolved = testResolved(source.ArtifactDescriptor{Name: "a", Version: "2", Steps: []source.MaterializationStep{{Type: "file", TargetPath: "a", SourceBytes: []byte("a")}}})
+	impl.resolved = testResolved(source.ArtifactDescriptor{Name: "a", Version: "2.0.0", Steps: []source.MaterializationStep{{Type: "file", TargetPath: "a", SourceBytes: []byte("a")}}})
 	if _, err := service.Install(context.Background(), request); err == nil {
 		t.Fatal("expected locked mismatch")
 	}
 
 	badRoot := t.TempDir()
-	badService, _ := testService(testResolved(source.ArtifactDescriptor{Name: "a", Version: "1", Steps: []source.MaterializationStep{{Type: "prompt", TargetPath: "a"}}}))
-	if _, err := badService.Install(context.Background(), Request{Root: badRoot, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "a"}); err == nil {
+	badService, _ := testService(testResolved(source.ArtifactDescriptor{Name: "a", Version: "1.0.0", Steps: []source.MaterializationStep{{Type: "prompt", TargetPath: "a"}}}))
+	if _, err := badService.Install(context.Background(), Request{Root: badRoot, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"}); err == nil {
 		t.Fatal("expected unsupported step")
 	}
 
@@ -276,7 +349,7 @@ func TestInstallRejectsLockedMismatchUnsupportedStepAndFileConflict(t *testing.T
 		t.Fatal(err)
 	}
 	conflictService, _ := testService(testResolved(testArtifact("a", "a")))
-	_, err := conflictService.Install(context.Background(), Request{Root: conflictRoot, Source: source.Ref{Type: "file", Locator: "source"}, Artifact: "a"})
+	_, err := conflictService.Install(context.Background(), Request{Root: conflictRoot, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"})
 	var conflict UserActionError
 	if !errors.As(err, &conflict) || conflict.Result.Outcome != OutcomeConflict {
 		t.Fatalf("conflict error = %T %v", err, err)

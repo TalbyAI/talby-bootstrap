@@ -247,4 +247,7 @@ func createTemp(root *os.Root, base string) (*os.File, string, error) {
 	}
 	return nil, "", fmt.Errorf("create temporary file for %q: too many collisions", base)
 }
-func Digest(content []byte) string { sum := sha256.Sum256(content); return hex.EncodeToString(sum[:]) }
+func Digest(content []byte) string {
+	sum := sha256.Sum256(content)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}

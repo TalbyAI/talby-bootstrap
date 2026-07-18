@@ -1,0 +1,16 @@
+schema_version: 1
+artifacts:
+  - source: file:./.tbboot-example/sources/local-example-source
+    source_version: sha256:159e8f5b56880d8c3ebef78690d2188dce4d2c132cfa96ab13f80382631109c1
+    artifact: base-readme
+    artifact_version: 1.0.0
+    files:
+      - path: README.md
+        digest: sha256:0433bc38298832688ce91714430a166f2c060d75380590c14563ef3ddff8ab95
+  - source: file:./.tbboot-example/sources/local-example-source
+    source_version: sha256:159e8f5b56880d8c3ebef78690d2188dce4d2c132cfa96ab13f80382631109c1
+    artifact: ci-github
+    artifact_version: 1.0.0
+    files:
+      - path: .github/workflows/ci.yml
+        digest: sha256:cbb719a02786f859673a8740618bb32fb5438fb83c9058eb8eec7d94929e6e1f

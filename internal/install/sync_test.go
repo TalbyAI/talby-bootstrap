@@ -32,7 +32,7 @@ func syncManifest(t *testing.T, root string, declarations ...repositorystate.Dec
 	}
 }
 func artifactDeclaration(name string) repositorystate.Declaration {
-	return repositorystate.Declaration{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeArtifact, Artifact: name}}
+	return repositorystate.Declaration{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeArtifact, Artifact: name}}
 }
 func hasChange(result Result, kind ChangeKind) bool {
 	for _, change := range result.Changes {
@@ -98,7 +98,7 @@ func TestSyncChangesIncludeProvenance(t *testing.T) {
 	}
 	for _, change := range result.Changes {
 		if change.Kind == ChangeFileCreated {
-			if change.SourceVersion != "snapshot" || change.OwnershipKind != OwnershipWholeFile {
+			if change.SourceVersion != testSnapshotVersion || change.OwnershipKind != OwnershipWholeFile {
 				t.Fatalf("file change = %#v, want complete provenance", change)
 			}
 			return
@@ -141,7 +141,7 @@ func TestSyncReplaysCanonicallyEquivalentTargetPath(t *testing.T) {
 }
 func TestSyncReplaysExactSourceArtifactSetWithoutAddingPublishedArtifacts(t *testing.T) {
 	root := t.TempDir()
-	decl := repositorystate.Declaration{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeSource}}
+	decl := repositorystate.Declaration{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeSource}}
 	syncManifest(t, root, decl)
 	service, impl := testService(testResolved(testArtifact("a", "a")))
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
@@ -159,7 +159,7 @@ func TestSyncRejectsIdentitySourceVersionArtifactVersionAndSetMismatch(t *testin
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
 		t.Fatal(err)
 	}
-	impl.resolved = testResolved(source.ArtifactDescriptor{Name: "a", Version: "2", Steps: []source.MaterializationStep{{Type: "file", TargetPath: "a", SourceBytes: []byte("a")}}})
+	impl.resolved = testResolved(source.ArtifactDescriptor{Name: "a", Version: "2.0.0", Steps: []source.MaterializationStep{{Type: "file", TargetPath: "a", SourceBytes: []byte("a")}}})
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err == nil {
 		t.Fatal("Sync() error = nil, want exact lock mismatch")
 	}
@@ -234,7 +234,7 @@ func hasConflict(result Result, kind ConflictKind) bool {
 	return false
 }
 func TestSyncRejectsReservedAndActiveSourceInputTargets(t *testing.T) {
-	for _, target := range []string{repositorystate.ManifestFileName, "input"} {
+	for _, target := range []string{repositorystate.ManifestFileName, repositorystate.RecoveryStateFileName, "input"} {
 		root := t.TempDir()
 		syncManifest(t, root, artifactDeclaration("a"))
 		resolved := testResolved(testArtifact("a", target))
@@ -313,9 +313,9 @@ func TestPersistPreparedClassifiesWriteRaceAsDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact := desiredArtifact{
-		Key:             repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Name: "a"},
-		Resolution:      repositorystate.ArtifactResolution{Name: "a", Version: "1"},
-		ResolvedVersion: "snapshot",
+		Key:             repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, Name: "a"},
+		Resolution:      repositorystate.ArtifactResolution{Name: "a", Version: "1.0.0"},
+		ResolvedVersion: testSnapshotVersion,
 		Descriptor:      testArtifact("a", "target"),
 	}
 	prepared := preparedOperation{
@@ -354,9 +354,9 @@ func TestPersistPreparedClassifiesAdoptionParentRaceAsDrift(t *testing.T) {
 		t.Skipf("symlink: %v", err)
 	}
 	artifact := desiredArtifact{
-		Key:             repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Name: "a"},
-		Resolution:      repositorystate.ArtifactResolution{Name: "a", Version: "1"},
-		ResolvedVersion: "snapshot",
+		Key:             repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, Name: "a"},
+		Resolution:      repositorystate.ArtifactResolution{Name: "a", Version: "1.0.0"},
+		ResolvedVersion: testSnapshotVersion,
 		Descriptor:      testArtifact("a", "parent/target"),
 	}
 	prepared := preparedOperation{
@@ -402,25 +402,60 @@ func TestSyncRejectsManagedVersionAndPathSetMismatch(t *testing.T) {
 		t.Fatal("Sync() error = nil")
 	}
 }
-func TestSyncReconstructsMissingLockOnlyOnExactManagedMatch(t *testing.T) {
+func TestSyncRejectsMissingLockWithManagedRecord(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root, artifactDeclaration("a"))
-	service, _ := testService(testResolved(testArtifact("a", "a")))
+	service, impl := testService(testResolved(testArtifact("a", "a")))
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(root, repositorystate.LockfileFileName)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil || !hasChange(got, ChangeResolutionLocked) {
-		t.Fatalf("Sync() = %#v, %v", got, err)
+	impl.calls = 0
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err == nil || !strings.Contains(err.Error(), "does not match a lockfile resolution") {
+		t.Fatalf("Sync() error = %v, want cross-document validation", err)
+	}
+	if impl.calls != 0 {
+		t.Fatalf("Resolve calls = %d, want 0", impl.calls)
 	}
 }
+
+func TestSyncRejectsMaterializationRecordThatDiffersFromLockfile(t *testing.T) {
+	root := t.TempDir()
+	sourceID := repositorystate.SourceIdentity{Type: "file", Locator: "./source"}
+	syncManifest(t, root, artifactDeclaration("a"))
+	store := repositorystate.NewStore()
+	if err := store.WriteLockfile(context.Background(), root, repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{{
+		Source:          sourceID,
+		ResolvedVersion: testSnapshotVersion,
+		Artifacts:       []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteMaterializationRecord(context.Background(), root, repositorystate.MaterializationRecord{Artifacts: []repositorystate.ManagedArtifactRecord{{
+		Source:          sourceID,
+		ResolvedVersion: testSnapshotVersionB,
+		Artifact:        "a",
+		ArtifactVersion: "1.0.0",
+		Files:           []repositorystate.ManagedFileRecord{{Path: "a", Digest: testSnapshotVersion}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err == nil || !strings.Contains(err.Error(), "does not match a lockfile resolution") {
+		t.Fatalf("Sync() error = %v, want cross-document validation", err)
+	}
+	if impl.calls != 0 {
+		t.Fatalf("Resolve calls = %d, want 0", impl.calls)
+	}
+}
+
 func TestSyncPrunesStaleUnmanagedLockState(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root)
 	store := repositorystate.NewStore()
-	if err := store.WriteLockfile(context.Background(), root, repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, ResolvedVersion: "v", Artifacts: []repositorystate.ArtifactResolution{{Name: "a", Version: "1"}}}}}); err != nil {
+	if err := store.WriteLockfile(context.Background(), root, repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, ResolvedVersion: testSnapshotVersion, Artifacts: []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}}}}}); err != nil {
 		t.Fatal(err)
 	}
 	service, _ := testService(testResolved(testArtifact("a", "a")))
@@ -434,7 +469,7 @@ func TestSyncEmptyManifestPrunesOrRequiresRemoval(t *testing.T) {
 func TestSyncRejectsUnsupportedStepOnlyWhenSelected(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root, artifactDeclaration("a"))
-	bad := source.ArtifactDescriptor{Name: "b", Version: "1", Steps: []source.MaterializationStep{{Type: "prompt", TargetPath: "b"}}}
+	bad := source.ArtifactDescriptor{Name: "b", Version: "1.0.0", Steps: []source.MaterializationStep{{Type: "prompt", TargetPath: "b"}}}
 	service, _ := testService(testResolved(testArtifact("a", "a"), bad))
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
 		t.Fatal(err)
@@ -445,7 +480,7 @@ func TestSyncFailsAtFirstResolutionErrorInDeclarationOrder(t *testing.T) {
 	declaration := func(locator string) repositorystate.Declaration {
 		return repositorystate.Declaration{Source: repositorystate.SourceIdentity{Type: "file", Locator: locator}, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeArtifact, Artifact: "a"}}
 	}
-	syncManifest(t, root, declaration("b"), declaration("a"))
+	syncManifest(t, root, declaration("./b"), declaration("./a"))
 	impl := &testSource{resolve: func(request source.ResolveRequest) (source.ResolvedSource, error) {
 		return source.ResolvedSource{}, fmt.Errorf("resolve %s", filepath.Base(request.Ref.Locator))
 	}}
@@ -499,7 +534,7 @@ func TestSyncUpdateDoesNotRewriteUnchangedLockfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.lockWrites = 0
-	impl.resolved = testResolved(source.ArtifactDescriptor{Name: "a", Version: "1", Steps: []source.MaterializationStep{{Type: "file", TargetPath: "a", SourceBytes: []byte("new")}}})
+	impl.resolved = testResolved(source.ArtifactDescriptor{Name: "a", Version: "1.0.0", Steps: []source.MaterializationStep{{Type: "file", TargetPath: "a", SourceBytes: []byte("new")}}})
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
 		t.Fatal(err)
 	}

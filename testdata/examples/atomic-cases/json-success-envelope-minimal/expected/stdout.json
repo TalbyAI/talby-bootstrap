@@ -8,28 +8,19 @@
     "changes": [
       {
         "kind": "resolution_locked",
-        "source": {
-          "type": "file",
-          "locator": ".tbboot-example/sources/local-example-source"
-        },
-        "source_version": "local-snapshot-975e21bf7b614f181e0158943c5d478357b71258c3e519f3daea85936264201d",
+        "source": "file:./.tbboot-example/sources/local-example-source",
+        "source_version": "sha256:29f26cb1df49e123fec7e801044be33ae84fe8820a2fe5717f531e3b8b6c85a9",
         "artifact": "base-readme"
       },
       {
         "kind": "declaration_added",
-        "source": {
-          "type": "file",
-          "locator": ".tbboot-example/sources/local-example-source"
-        },
+        "source": "file:./.tbboot-example/sources/local-example-source",
         "artifact": "base-readme"
       },
       {
         "kind": "file_created",
-        "source": {
-          "type": "file",
-          "locator": ".tbboot-example/sources/local-example-source"
-        },
-        "source_version": "local-snapshot-975e21bf7b614f181e0158943c5d478357b71258c3e519f3daea85936264201d",
+        "source": "file:./.tbboot-example/sources/local-example-source",
+        "source_version": "sha256:29f26cb1df49e123fec7e801044be33ae84fe8820a2fe5717f531e3b8b6c85a9",
         "artifact": "base-readme",
         "path": "README.md",
         "ownership_kind": "whole_file"

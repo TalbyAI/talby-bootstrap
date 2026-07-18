@@ -2,29 +2,22 @@
 
 ## Status
 
-Accepted for v1.
+Accepted for 0.1.
 
 ## Context
 
-Talby Bootstrap writes into user repositories. Remote content, executable steps, and prompt-driven changes need explicit trust decisions before materialization.
+Talby Bootstrap writes into user repositories. The 0.1 implementation acquires local `file:` Sources and materializes whole-file `file` steps. In-root Sources are allowed by default; external absolute Sources require explicit Manifest approval of their **Source Identity**. Remote content, executable steps, and prompt-driven changes are deferred.
 
 ## Decision
 
 The base **Trust Policy** lives in the versioned **Manifest**. Local machine settings may harden this policy but must not silently weaken it.
 
-V1 supports only `file` and `git` as approvable **Source Types** for consumer-side **Acquisition Channels**.
+The persistence contract recognizes `file:` and `git:` Source References. 0.1 acquires `file:` Sources: in-root Sources are allowed by default, while external absolute Sources require explicit Manifest approval of their **Source Identity**. `git:` identities are stored but not acquired.
 
-- `file:` sources are allowed by default only when they point inside the current **Operation Root**.
-- `git:` sources always require explicit approval in the **Manifest**.
-
-Trust approval is evaluated against **Source Identity**, not the published **Source Descriptor** alone. Approving one acquired source does not automatically approve another acquisition channel that publishes similar content. Risky **Materialization Step Types** still require explicit allowlisting and first-install confirmation. In v1, `script` and `prompt` are risky step types.
-
-When a source type can prove publication time, a **Minimum Age Rule** may reject resolved targets that are too new.
+Trust approval is evaluated against **Source Identity**, not the published **Source Descriptor** alone. Broader trust policy, risky step allowlists, first-install confirmation, and **Minimum Age Rule** behavior are deferred with their source and step implementations.
 
 ## Consequences
 
 - Trust decisions are reviewable in repository history.
-- Approving one **Source Identity** does not silently approve executable or prompt-driven changes.
-- Approving one **Source Identity** does not silently approve the same published content through another acquisition channel.
-- The first version avoids source-type sprawl while the trust model is still small.
-- Policy denial uses a distinct exit code so automation can classify it.
+- The 0.1 boundary prevents remote acquisition and executable or prompt-driven changes from reaching materialization.
+- Future acquisition channels will require their own explicit trust decisions.

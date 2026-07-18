@@ -1,1 +1,5 @@
-installed 2 artifacts from source file:local-example-source
+install: applied 4 changes (2 artifacts)
+resolution_locked file:./.tbboot-example/sources/local-example-source source_version=sha256:159e8f5b56880d8c3ebef78690d2188dce4d2c132cfa96ab13f80382631109c1
+declaration_added file:./.tbboot-example/sources/local-example-source
+file_created file:./.tbboot-example/sources/local-example-source source_version=sha256:159e8f5b56880d8c3ebef78690d2188dce4d2c132cfa96ab13f80382631109c1 base-readme README.md ownership_kind=whole_file
+file_created file:./.tbboot-example/sources/local-example-source source_version=sha256:159e8f5b56880d8c3ebef78690d2188dce4d2c132cfa96ab13f80382631109c1 ci-github .github/workflows/ci.yml ownership_kind=whole_file

@@ -3,6 +3,7 @@
 package install
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
@@ -19,9 +20,9 @@ func TestPreflightRecognizesCaseInsensitiveManagedOwner(t *testing.T) {
 	sourceB := repositorystate.SourceIdentity{Type: "file", Locator: "source-b"}
 	record := repositorystate.MaterializationRecord{Artifacts: []repositorystate.ManagedArtifactRecord{{
 		Source:          sourceA,
-		ResolvedVersion: "snapshot",
+		ResolvedVersion: testSnapshotVersion,
 		Artifact:        "a",
-		ArtifactVersion: "1",
+		ArtifactVersion: "1.0.0",
 		Files:           []repositorystate.ManagedFileRecord{{Path: "Folder/File", Digest: "unused"}},
 	}}}
 	desired := []desiredArtifact{{
@@ -35,5 +36,16 @@ func TestPreflightRecognizesCaseInsensitiveManagedOwner(t *testing.T) {
 	}
 	if len(conflicts) != 1 || conflicts[0].Kind != ConflictOwnership {
 		t.Fatalf("conflicts = %#v, want case-insensitive ownership conflict", conflicts)
+	}
+}
+
+func TestPreflightRejectsCaseAliasedReservedRecoveryState(t *testing.T) {
+	desired := []desiredArtifact{{
+		Key:        repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Name: "a"},
+		Descriptor: testArtifact("a", strings.ToUpper(repositorystate.RecoveryStateFileName)),
+	}}
+
+	if _, _, err := preflightFiles(t.TempDir(), desired, repositorystate.MaterializationRecord{}); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("preflightFiles() error = %v, want reserved target error", err)
 	}
 }

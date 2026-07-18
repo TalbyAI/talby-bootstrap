@@ -2,31 +2,25 @@
 
 ## Status
 
-Accepted for v1.
+Accepted for 0.1.
 
 ## Context
 
-Artifacts can be discovered through catalogs or installed directly from a published source. Reproducibility requires exact resolved state, while user intent should remain editable and stable across different acquisition channels.
+The first public slice installs directly from a published local Source. Reproducibility requires exact resolved state, while user intent should remain editable and stable across acquisition channels that are added later.
 
 ## Decision
 
 The stable identity of an **Artifact** is **Source** plus **Artifact Name**. A **Catalog** is only an index and is not the source of truth.
 
-A **Manifest** stores desired state and enough stable **Source Identity** to re-resolve declared targets. Any original user-facing reference is optional metadata only.
+A **Manifest** stores desired state and enough stable **Source Identity** to re-resolve declared targets. Persisted Source References are scalar `file:<locator>` or `git:<locator>` values; the internal model remains structured. Any original user-facing reference is optional metadata only.
 
 A **Resolution** records exact artifact versions and origins. A **Lockfile** persists the **Resolution** and lives beside the **Manifest** in the consumer repository.
 
-Direct install version pinning applies to **Source Version** only. If no source version is provided:
-
-- `git` resolves to the latest stable published **Source Version** allowed by policy for that acquired **Source Identity**.
-- `file` records a local snapshot hash in the **Lockfile** for that acquired **Source Identity**.
-
-Later syncs keep the previously resolved **Source Version** until the user explicitly upgrades. For `git:` targets, `upgrade` advances already-declared Sources or Artifacts to the latest stable published **Source Version** allowed by policy. For `file:` targets, it re-reads the current local path and records the resulting snapshot hash; an unchanged snapshot is a no-op. Source scope updates every declared Artifact in the Source snapshot, while Artifact scope updates only the selected Artifact and leaves sibling Artifacts on their existing snapshots. Successful upgrade writes only the affected exact resolutions to the **Lockfile** and leaves the **Manifest** unchanged.
+For 0.1, local `file:` Sources are acquired. In-root Sources are allowed by default, while external absolute Sources require explicit **Manifest** approval of their **Source Identity**. The Source Version is a deterministic `sha256:` snapshot hash recorded in the Lockfile. Git identities and versions have canonical validation/storage rules, but Git acquisition is deferred.
 
 ## Consequences
 
 - Reproducibility is versioned with the repository.
-- Catalog loss or cache refresh does not redefine installed artifacts.
+- No catalog or cache is consulted by the 0.1 direct install path.
 - Two acquisition channels that publish the same content are still distinct when they produce different **Source Identity** values.
-- Artifact-level upgrade is rejected when the manifest declares the whole source.
-- Rich version ranges are deferred until there is a measured need.
+- Upgrade behavior and rich version ranges are deferred until there is a measured need.

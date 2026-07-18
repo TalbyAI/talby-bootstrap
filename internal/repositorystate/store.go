@@ -1,7 +1,6 @@
 package repositorystate
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,16 +8,16 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
 	supportedSchemaVersion        = 1
-	ManifestFileName              = "talby-artifacts.yaml"
-	LockfileFileName              = "talby-artifacts.lock.yaml"
-	MaterializationRecordFileName = "talby-artifacts.managed.yaml"
+	SourceDescriptorFileName      = "tbboot-source.yaml"
+	ArtifactDescriptorFileName    = "tbboot-artifact.yaml"
+	ManifestFileName              = "tbboot-artifacts.yaml"
+	LockfileFileName              = "tbboot-artifacts.lock.yaml"
+	MaterializationRecordFileName = "tbboot-artifacts.managed.yaml"
+	RecoveryStateFileName         = "tbboot-artifacts.recovery.yaml"
 )
 
 type Store interface {
@@ -28,6 +27,8 @@ type Store interface {
 	WriteLockfile(context.Context, string, Lockfile) error
 	LoadMaterializationRecord(context.Context, string) (MaterializationRecord, error)
 	WriteMaterializationRecord(context.Context, string, MaterializationRecord) error
+	LoadRecoveryState(context.Context, string) (RecoveryState, error)
+	WriteRecoveryState(context.Context, string, RecoveryState) error
 }
 
 type fileStore struct{}
@@ -38,27 +39,19 @@ func NewStore() Store {
 
 type manifestDocument struct {
 	SchemaVersion int                      `yaml:"schema_version"`
-	TrustPolicy   manifestTrustPolicyDTO   `yaml:"trust_policy,omitempty"`
+	TrustPolicy   *manifestTrustPolicyDTO  `yaml:"trust_policy,omitempty"`
 	Declarations  []manifestDeclarationDTO `yaml:"declarations,omitempty"`
 }
 
 type manifestTrustPolicyDTO struct {
-	ApprovedSources []SourceIdentity `yaml:"approved_sources,omitempty"`
+	ApprovedSources []string `yaml:"approved_sources,omitempty"`
 }
 
 type manifestDeclarationDTO struct {
-	Source SourceIdentity    `yaml:"source"`
-	Target manifestTargetDTO `yaml:"target"`
-	Input  *manifestInputDTO `yaml:"input,omitempty"`
-}
-
-type manifestTargetDTO struct {
-	Scope    DeclarationScope `yaml:"scope"`
-	Artifact string           `yaml:"artifact,omitempty"`
-}
-
-type manifestInputDTO struct {
-	Locator string `yaml:"locator,omitempty"`
+	Source        string           `yaml:"source"`
+	Scope         DeclarationScope `yaml:"scope"`
+	Artifact      string           `yaml:"artifact,omitempty"`
+	SourceVersion string           `yaml:"source_version,omitempty"`
 }
 
 type lockfileDocument struct {
@@ -67,9 +60,10 @@ type lockfileDocument struct {
 }
 
 type lockfileResolutionDTO struct {
-	Source          SourceIdentity        `yaml:"source"`
-	ResolvedVersion string                `yaml:"resolved_version"`
-	Artifacts       []lockfileArtifactDTO `yaml:"artifacts"`
+	Source        string                `yaml:"source"`
+	SourceVersion string                `yaml:"source_version"`
+	Commit        string                `yaml:"commit,omitempty"`
+	Artifacts     []lockfileArtifactDTO `yaml:"artifacts"`
 }
 
 type lockfileArtifactDTO struct {
@@ -83,8 +77,9 @@ type materializationRecordDocument struct {
 }
 
 type materializationArtifactRecordDTO struct {
-	Source          SourceIdentity                  `yaml:"source"`
-	ResolvedVersion string                          `yaml:"resolved_version"`
+	Source          string                          `yaml:"source"`
+	SourceVersion   string                          `yaml:"source_version"`
+	Commit          string                          `yaml:"commit,omitempty"`
 	Artifact        string                          `yaml:"artifact"`
 	ArtifactVersion string                          `yaml:"artifact_version"`
 	Files           []materializationManagedFileDTO `yaml:"files,omitempty"`
@@ -95,10 +90,30 @@ type materializationManagedFileDTO struct {
 	Digest string `yaml:"digest"`
 }
 
-func decodeYAML(data []byte, value any) error {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	return decoder.Decode(value)
+type recoveryDocument struct {
+	SchemaVersion int                      `yaml:"schema_version"`
+	Code          string                   `yaml:"code"`
+	Summary       string                   `yaml:"summary"`
+	Observations  []recoveryObservationDTO `yaml:"observations"`
+}
+
+type recoveryObservationDTO struct {
+	Path     string              `yaml:"path"`
+	Result   string              `yaml:"result"`
+	Expected recoveryExpectedDTO `yaml:"expected"`
+	Owner    *recoveryOwnerDTO   `yaml:"owner,omitempty"`
+}
+
+type recoveryExpectedDTO struct {
+	State  string `yaml:"state"`
+	Digest string `yaml:"digest,omitempty"`
+	Mode   uint32 `yaml:"mode,omitempty"`
+}
+
+type recoveryOwnerDTO struct {
+	Source        string `yaml:"source"`
+	SourceVersion string `yaml:"source_version"`
+	Artifact      string `yaml:"artifact"`
 }
 
 func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) {
@@ -109,12 +124,8 @@ func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) 
 		}
 		return Manifest{}, err
 	}
-	if strings.TrimSpace(string(bytes)) == "" {
-		return Manifest{}, StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("file is empty")}
-	}
-
 	var doc manifestDocument
-	if err := decodeYAML(bytes, &doc); err != nil {
+	if err := decodeStrictYAML(bytes, &doc); err != nil {
 		return Manifest{}, StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: err}
 	}
 	if doc.SchemaVersion != supportedSchemaVersion {
@@ -125,15 +136,26 @@ func (fileStore) LoadManifest(_ context.Context, root string) (Manifest, error) 
 		}
 	}
 
-	manifest := Manifest{
-		TrustPolicy:  TrustPolicy{ApprovedSources: append([]SourceIdentity(nil), doc.TrustPolicy.ApprovedSources...)},
-		Declarations: make([]Declaration, 0, len(doc.Declarations)),
+	manifest := Manifest{Declarations: make([]Declaration, 0, len(doc.Declarations))}
+	if doc.TrustPolicy != nil {
+		manifest.TrustPolicy.ApprovedSources = make([]SourceIdentity, 0, len(doc.TrustPolicy.ApprovedSources))
+		for _, raw := range doc.TrustPolicy.ApprovedSources {
+			source, err := canonicalSourceReference(root, raw)
+			if err != nil {
+				return Manifest{}, StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("approved source: %w", err)}
+			}
+			manifest.TrustPolicy.ApprovedSources = append(manifest.TrustPolicy.ApprovedSources, source)
+		}
 	}
 	for _, dto := range doc.Declarations {
+		source, err := canonicalSourceReference(root, dto.Source)
+		if err != nil {
+			return Manifest{}, StateFileError{File: StateFileManifest, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("declaration source: %w", err)}
+		}
 		manifest.Declarations = append(manifest.Declarations, Declaration{
-			Source: dto.Source,
-			Target: DeclarationTarget{Scope: dto.Target.Scope, Artifact: dto.Target.Artifact},
-			Input:  sourceInputFromDTO(dto.Input),
+			Source:        source,
+			Target:        DeclarationTarget{Scope: dto.Scope, Artifact: dto.Artifact},
+			SourceVersion: dto.SourceVersion,
 		})
 	}
 	if err := ValidateManifest(root, manifest); err != nil {
@@ -148,21 +170,17 @@ func (fileStore) WriteManifest(_ context.Context, root string, manifest Manifest
 		return err
 	}
 
-	doc := manifestDocument{
-		SchemaVersion: supportedSchemaVersion,
-		TrustPolicy: manifestTrustPolicyDTO{
-			ApprovedSources: append([]SourceIdentity(nil), manifest.TrustPolicy.ApprovedSources...),
-		},
-		Declarations: make([]manifestDeclarationDTO, 0, len(manifest.Declarations)),
-	}
-	sort.Slice(doc.TrustPolicy.ApprovedSources, func(i, j int) bool {
-		left := doc.TrustPolicy.ApprovedSources[i]
-		right := doc.TrustPolicy.ApprovedSources[j]
-		if left.Type != right.Type {
-			return left.Type < right.Type
+	doc := manifestDocument{SchemaVersion: supportedSchemaVersion, Declarations: make([]manifestDeclarationDTO, 0, len(manifest.Declarations))}
+	if len(manifest.TrustPolicy.ApprovedSources) > 0 {
+		approved := append([]SourceIdentity(nil), manifest.TrustPolicy.ApprovedSources...)
+		sort.Slice(approved, func(i, j int) bool {
+			return FormatSourceReference(approved[i]) < FormatSourceReference(approved[j])
+		})
+		doc.TrustPolicy = &manifestTrustPolicyDTO{ApprovedSources: make([]string, 0, len(approved))}
+		for _, source := range approved {
+			doc.TrustPolicy.ApprovedSources = append(doc.TrustPolicy.ApprovedSources, FormatSourceReference(source))
 		}
-		return left.Locator < right.Locator
-	})
+	}
 
 	declarations := append([]Declaration(nil), manifest.Declarations...)
 	sort.Slice(declarations, func(i, j int) bool {
@@ -170,9 +188,10 @@ func (fileStore) WriteManifest(_ context.Context, root string, manifest Manifest
 	})
 	for _, decl := range declarations {
 		doc.Declarations = append(doc.Declarations, manifestDeclarationDTO{
-			Source: decl.Source,
-			Target: manifestTargetDTO{Scope: decl.Target.Scope, Artifact: decl.Target.Artifact},
-			Input:  manifestInputFromDomain(decl.Input),
+			Source:        FormatSourceReference(decl.Source),
+			Scope:         decl.Target.Scope,
+			Artifact:      decl.Target.Artifact,
+			SourceVersion: decl.SourceVersion,
 		})
 	}
 
@@ -191,12 +210,8 @@ func (fileStore) LoadLockfile(_ context.Context, root string) (Lockfile, error) 
 		}
 		return Lockfile{}, err
 	}
-	if strings.TrimSpace(string(bytes)) == "" {
-		return Lockfile{}, StateFileError{File: StateFileLockfile, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("file is empty")}
-	}
-
 	var doc lockfileDocument
-	if err := decodeYAML(bytes, &doc); err != nil {
+	if err := decodeStrictYAML(bytes, &doc); err != nil {
 		return Lockfile{}, StateFileError{File: StateFileLockfile, Kind: StateFileErrorInvalidFormat, Err: err}
 	}
 	if doc.SchemaVersion != supportedSchemaVersion {
@@ -211,11 +226,15 @@ func (fileStore) LoadLockfile(_ context.Context, root string) (Lockfile, error) 
 		Resolutions: make([]Resolution, 0, len(doc.Resolutions)),
 	}
 	for _, dto := range doc.Resolutions {
+		source, err := canonicalSourceReference(root, dto.Source)
+		if err != nil {
+			return Lockfile{}, StateFileError{File: StateFileLockfile, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("resolution source: %w", err)}
+		}
 		artifacts := make([]ArtifactResolution, 0, len(dto.Artifacts))
 		for _, artifact := range dto.Artifacts {
 			artifacts = append(artifacts, ArtifactResolution{Name: artifact.Name, Version: artifact.Version})
 		}
-		lockfile.Resolutions = append(lockfile.Resolutions, Resolution{Source: dto.Source, ResolvedVersion: dto.ResolvedVersion, Artifacts: artifacts})
+		lockfile.Resolutions = append(lockfile.Resolutions, Resolution{Source: source, ResolvedVersion: dto.SourceVersion, Commit: dto.Commit, Artifacts: artifacts})
 	}
 	if err := ValidateLockfile(lockfile); err != nil {
 		return Lockfile{}, StateFileError{File: StateFileLockfile, Kind: StateFileErrorInvalidFormat, Err: err}
@@ -228,6 +247,11 @@ func (fileStore) WriteLockfile(_ context.Context, root string, lockfile Lockfile
 	if err := ValidateLockfile(lockfile); err != nil {
 		return err
 	}
+	for _, resolution := range lockfile.Resolutions {
+		if err := validateCanonicalStateSource(root, resolution.Source); err != nil {
+			return fmt.Errorf("lockfile resolution source: %w", err)
+		}
+	}
 
 	doc := lockfileDocument{
 		SchemaVersion: supportedSchemaVersion,
@@ -239,11 +263,13 @@ func (fileStore) WriteLockfile(_ context.Context, root string, lockfile Lockfile
 		return SourceIdentityKey(resolutions[i].Source)+"\x00"+resolutions[i].ResolvedVersion < SourceIdentityKey(resolutions[j].Source)+"\x00"+resolutions[j].ResolvedVersion
 	})
 	for _, res := range resolutions {
-		artifacts := make([]lockfileArtifactDTO, 0, len(res.Artifacts))
-		for _, artifact := range res.Artifacts {
-			artifacts = append(artifacts, lockfileArtifactDTO{Name: artifact.Name, Version: artifact.Version})
+		artifacts := append([]ArtifactResolution(nil), res.Artifacts...)
+		sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Name < artifacts[j].Name })
+		artifactDTOs := make([]lockfileArtifactDTO, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			artifactDTOs = append(artifactDTOs, lockfileArtifactDTO{Name: artifact.Name, Version: artifact.Version})
 		}
-		doc.Resolutions = append(doc.Resolutions, lockfileResolutionDTO{Source: res.Source, ResolvedVersion: res.ResolvedVersion, Artifacts: artifacts})
+		doc.Resolutions = append(doc.Resolutions, lockfileResolutionDTO{Source: FormatSourceReference(res.Source), SourceVersion: res.ResolvedVersion, Commit: res.Commit, Artifacts: artifactDTOs})
 	}
 
 	bytes, err := encodeYAML(doc)
@@ -261,12 +287,8 @@ func (fileStore) LoadMaterializationRecord(_ context.Context, root string) (Mate
 		}
 		return MaterializationRecord{}, err
 	}
-	if strings.TrimSpace(string(bytes)) == "" {
-		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("file is empty")}
-	}
-
 	var doc materializationRecordDocument
-	if err := decodeYAML(bytes, &doc); err != nil {
+	if err := decodeStrictYAML(bytes, &doc); err != nil {
 		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: err}
 	}
 	if doc.SchemaVersion != supportedSchemaVersion {
@@ -279,6 +301,10 @@ func (fileStore) LoadMaterializationRecord(_ context.Context, root string) (Mate
 
 	record := MaterializationRecord{Artifacts: make([]ManagedArtifactRecord, 0, len(doc.Artifacts))}
 	for _, dto := range doc.Artifacts {
+		source, err := canonicalSourceReference(root, dto.Source)
+		if err != nil {
+			return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("managed artifact source: %w", err)}
+		}
 		files := make([]ManagedFileRecord, 0, len(dto.Files))
 		for _, file := range dto.Files {
 			files = append(files, ManagedFileRecord{
@@ -286,7 +312,7 @@ func (fileStore) LoadMaterializationRecord(_ context.Context, root string) (Mate
 				Digest: file.Digest,
 			})
 		}
-		record.Artifacts = append(record.Artifacts, ManagedArtifactRecord{Source: dto.Source, ResolvedVersion: dto.ResolvedVersion, Artifact: dto.Artifact, ArtifactVersion: dto.ArtifactVersion, Files: files})
+		record.Artifacts = append(record.Artifacts, ManagedArtifactRecord{Source: source, ResolvedVersion: dto.SourceVersion, Commit: dto.Commit, Artifact: dto.Artifact, ArtifactVersion: dto.ArtifactVersion, Files: files})
 	}
 	if err := ValidateMaterializationRecord(record); err != nil {
 		return MaterializationRecord{}, StateFileError{File: StateFileMaterializationRecord, Kind: StateFileErrorInvalidFormat, Err: err}
@@ -299,6 +325,11 @@ func (fileStore) WriteMaterializationRecord(_ context.Context, root string, reco
 	if err := ValidateMaterializationRecord(record); err != nil {
 		return err
 	}
+	for _, artifact := range record.Artifacts {
+		if err := validateCanonicalStateSource(root, artifact.Source); err != nil {
+			return fmt.Errorf("managed artifact source: %w", err)
+		}
+	}
 
 	doc := materializationRecordDocument{
 		SchemaVersion: supportedSchemaVersion,
@@ -306,7 +337,7 @@ func (fileStore) WriteMaterializationRecord(_ context.Context, root string, reco
 	}
 	artifacts := append([]ManagedArtifactRecord(nil), record.Artifacts...)
 	sort.Slice(artifacts, func(i, j int) bool {
-		return SourceIdentityKey(artifacts[i].Source)+"\x00"+artifacts[i].Artifact < SourceIdentityKey(artifacts[j].Source)+"\x00"+artifacts[j].Artifact
+		return SourceIdentityKey(artifacts[i].Source)+"\x00"+artifacts[i].ResolvedVersion+"\x00"+artifacts[i].Artifact < SourceIdentityKey(artifacts[j].Source)+"\x00"+artifacts[j].ResolvedVersion+"\x00"+artifacts[j].Artifact
 	})
 	for _, artifact := range artifacts {
 		files := append([]ManagedFileRecord(nil), artifact.Files...)
@@ -320,7 +351,7 @@ func (fileStore) WriteMaterializationRecord(_ context.Context, root string, reco
 				Digest: file.Digest,
 			})
 		}
-		doc.Artifacts = append(doc.Artifacts, materializationArtifactRecordDTO{Source: artifact.Source, ResolvedVersion: artifact.ResolvedVersion, Artifact: artifact.Artifact, ArtifactVersion: artifact.ArtifactVersion, Files: fileDTOs})
+		doc.Artifacts = append(doc.Artifacts, materializationArtifactRecordDTO{Source: FormatSourceReference(artifact.Source), SourceVersion: artifact.ResolvedVersion, Commit: artifact.Commit, Artifact: artifact.Artifact, ArtifactVersion: artifact.ArtifactVersion, Files: fileDTOs})
 	}
 
 	bytes, err := encodeYAML(doc)
@@ -328,6 +359,64 @@ func (fileStore) WriteMaterializationRecord(_ context.Context, root string, reco
 		return err
 	}
 	return writeFileAtomically(filepath.Join(root, MaterializationRecordFileName), bytes, 0o644)
+}
+
+func (fileStore) LoadRecoveryState(_ context.Context, root string) (RecoveryState, error) {
+	bytes, err := os.ReadFile(filepath.Join(root, RecoveryStateFileName))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return RecoveryState{}, StateFileError{File: StateFileRecovery, Kind: StateFileErrorNotFound, Err: err}
+		}
+		return RecoveryState{}, err
+	}
+	var doc recoveryDocument
+	if err := decodeStrictYAML(bytes, &doc); err != nil {
+		return RecoveryState{}, StateFileError{File: StateFileRecovery, Kind: StateFileErrorInvalidFormat, Err: err}
+	}
+	if doc.SchemaVersion != supportedSchemaVersion {
+		return RecoveryState{}, StateFileError{File: StateFileRecovery, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("schema_version must be %d", supportedSchemaVersion)}
+	}
+	state := RecoveryState{Code: doc.Code, Summary: doc.Summary, Observations: make([]RecoveryObservation, 0, len(doc.Observations))}
+	for _, dto := range doc.Observations {
+		observation := RecoveryObservation{Path: dto.Path, Result: dto.Result, ExpectedState: dto.Expected.State, Digest: dto.Expected.Digest, Mode: dto.Expected.Mode}
+		if dto.Owner != nil {
+			source, err := canonicalSourceReference(root, dto.Owner.Source)
+			if err != nil {
+				return RecoveryState{}, StateFileError{File: StateFileRecovery, Kind: StateFileErrorInvalidFormat, Err: fmt.Errorf("recovery owner source: %w", err)}
+			}
+			observation.Owner = &RecoveryOwner{Source: source, ResolvedVersion: dto.Owner.SourceVersion, Artifact: dto.Owner.Artifact}
+		}
+		state.Observations = append(state.Observations, observation)
+	}
+	if err := ValidateRecoveryState(root, state); err != nil {
+		return RecoveryState{}, StateFileError{File: StateFileRecovery, Kind: StateFileErrorInvalidFormat, Err: err}
+	}
+	return state, nil
+}
+
+func (fileStore) WriteRecoveryState(_ context.Context, root string, state RecoveryState) error {
+	if err := ValidateRecoveryState(root, state); err != nil {
+		return err
+	}
+	doc := recoveryDocument{SchemaVersion: supportedSchemaVersion, Code: state.Code, Summary: state.Summary, Observations: make([]recoveryObservationDTO, 0, len(state.Observations))}
+	observations := append([]RecoveryObservation(nil), state.Observations...)
+	sort.Slice(observations, func(i, j int) bool { return observations[i].Path < observations[j].Path })
+	for _, observation := range observations {
+		dto := recoveryObservationDTO{
+			Path:     observation.Path,
+			Result:   observation.Result,
+			Expected: recoveryExpectedDTO{State: observation.ExpectedState, Digest: observation.Digest, Mode: observation.Mode},
+		}
+		if observation.Owner != nil {
+			dto.Owner = &recoveryOwnerDTO{Source: FormatSourceReference(observation.Owner.Source), SourceVersion: observation.Owner.ResolvedVersion, Artifact: observation.Owner.Artifact}
+		}
+		doc.Observations = append(doc.Observations, dto)
+	}
+	bytes, err := encodeYAML(doc)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomically(filepath.Join(root, RecoveryStateFileName), bytes, 0o600)
 }
 
 func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
@@ -367,30 +456,28 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-func encodeYAML(value any) ([]byte, error) {
-	var buffer bytes.Buffer
-	encoder := yaml.NewEncoder(&buffer)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(value); err != nil {
-		_ = encoder.Close()
-		return nil, err
+func canonicalSourceReference(root, raw string) (SourceIdentity, error) {
+	source, err := ParseSourceReference(raw)
+	if err != nil {
+		return SourceIdentity{}, err
 	}
-	if err := encoder.Close(); err != nil {
-		return nil, err
+	normalized, err := NormalizeSourceIdentity(root, source)
+	if err != nil {
+		return SourceIdentity{}, err
 	}
-	return buffer.Bytes(), nil
+	if FormatSourceReference(normalized) != raw {
+		return SourceIdentity{}, fmt.Errorf("source reference is not canonical")
+	}
+	return normalized, nil
 }
 
-func sourceInputFromDTO(input *manifestInputDTO) *SourceInput {
-	if input == nil {
-		return nil
+func validateCanonicalStateSource(root string, source SourceIdentity) error {
+	normalized, err := NormalizeSourceIdentity(root, source)
+	if err != nil {
+		return err
 	}
-	return &SourceInput{Locator: input.Locator}
-}
-
-func manifestInputFromDomain(input *SourceInput) *manifestInputDTO {
-	if input == nil {
-		return nil
+	if normalized != source {
+		return fmt.Errorf("source locator is not normalized")
 	}
-	return &manifestInputDTO{Locator: input.Locator}
+	return nil
 }

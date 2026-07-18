@@ -1,0 +1,9 @@
+schema_version: 1
+resolutions:
+  - source: file:./.tbboot-example/sources/local-example-source
+    source_version: sha256:159e8f5b56880d8c3ebef78690d2188dce4d2c132cfa96ab13f80382631109c1
+    artifacts:
+      - name: base-readme
+        version: 1.0.0
+      - name: ci-github
+        version: 1.0.0

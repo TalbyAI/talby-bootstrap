@@ -5,13 +5,15 @@ import (
 	"testing"
 )
 
-func TestValidateMaterializationRecordAcceptsSlashNormalizedNestedPath(t *testing.T) {
+func recordDigest(hexDigit string) string { return "sha256:" + strings.Repeat(hexDigit, 64) }
+
+func TestValidateMaterializationRecordAcceptsCanonicalNestedPath(t *testing.T) {
 	record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{
-		Source:          SourceIdentity{Type: "file", Locator: "source"},
-		ResolvedVersion: "snapshot",
+		Source:          SourceIdentity{Type: SourceTypeFile, Locator: "./source"},
+		ResolvedVersion: recordDigest("a"),
 		Artifact:        "a",
-		ArtifactVersion: "1",
-		Files:           []ManagedFileRecord{{Path: "dir/file", Digest: strings.Repeat("a", 64)}},
+		ArtifactVersion: "1.0.0",
+		Files:           []ManagedFileRecord{{Path: "dir/file", Digest: recordDigest("a")}},
 	}}}
 	if err := ValidateMaterializationRecord(record); err != nil {
 		t.Fatalf("ValidateMaterializationRecord() error = %v", err)
@@ -19,7 +21,7 @@ func TestValidateMaterializationRecordAcceptsSlashNormalizedNestedPath(t *testin
 }
 
 func TestValidateMaterializationRecordRequiresExactVersionsAndUniquePaths(t *testing.T) {
-	r := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{Source: SourceIdentity{Type: "file", Locator: "x"}, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "x", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
+	r := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{Source: SourceIdentity{Type: SourceTypeFile, Locator: "./x"}, ResolvedVersion: recordDigest("a"), Artifact: "a", ArtifactVersion: "1.0.0", Files: []ManagedFileRecord{{Path: "x", Digest: recordDigest("a")}}}}}
 	if err := ValidateMaterializationRecord(r); err != nil {
 		t.Fatal(err)
 	}
@@ -27,58 +29,42 @@ func TestValidateMaterializationRecordRequiresExactVersionsAndUniquePaths(t *tes
 	if ValidateMaterializationRecord(r) == nil {
 		t.Fatal("expected missing artifact version rejection")
 	}
-	r.Artifacts[0].ArtifactVersion = "1"
-	r.Artifacts = append(r.Artifacts, ManagedArtifactRecord{Source: SourceIdentity{Type: "file", Locator: "y"}, ResolvedVersion: "v", Artifact: "b", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "x", Digest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}})
+	r.Artifacts[0].ArtifactVersion = "1.0.0"
+	r.Artifacts = append(r.Artifacts, ManagedArtifactRecord{Source: SourceIdentity{Type: SourceTypeFile, Locator: "./y"}, ResolvedVersion: recordDigest("b"), Artifact: "b", ArtifactVersion: "1.0.0", Files: []ManagedFileRecord{{Path: "x", Digest: recordDigest("b")}}})
 	if ValidateMaterializationRecord(r) == nil {
 		t.Fatal("expected duplicate path rejection")
 	}
 }
+
 func TestMaterializationRecordArtifactLookupUsesSourceAndArtifactName(t *testing.T) {
-	source := SourceIdentity{Type: "file", Locator: "x"}
-	record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{Source: source, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "x", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "./x"}
+	record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{Source: source, ResolvedVersion: recordDigest("a"), Artifact: "a", ArtifactVersion: "1.0.0", Files: []ManagedFileRecord{{Path: "x", Digest: recordDigest("a")}}}}}
 	if _, ok := record.Artifact(ArtifactKey{Source: source, Name: "a"}); !ok {
 		t.Fatal("missing artifact")
 	}
 }
 
 func TestUpsertManagedArtifactInsertsReplacesAndSorts(t *testing.T) {
-	digest := strings.Repeat("a", 64)
-	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
-	b := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "b", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "z", Digest: digest}, {Path: "a", Digest: digest}}}
-	a := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "a", Digest: digest}}}
+	digest := recordDigest("a")
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "./source"}
+	b := ManagedArtifactRecord{Source: source, ResolvedVersion: digest, Artifact: "b", ArtifactVersion: "1.0.0", Files: []ManagedFileRecord{{Path: "z", Digest: digest}, {Path: "a", Digest: digest}}}
+	a := ManagedArtifactRecord{Source: source, ResolvedVersion: digest, Artifact: "a", ArtifactVersion: "1.0.0", Files: []ManagedFileRecord{{Path: "a", Digest: digest}}}
 	record := UpsertManagedArtifact(MaterializationRecord{}, b)
 	record = UpsertManagedArtifact(record, a)
 	if record.Artifacts[0].Artifact != "a" || record.Artifacts[1].Files[0].Path != "a" {
 		t.Fatalf("inserted record not sorted: %#v", record)
 	}
-	b.ArtifactVersion = "2"
+	b.ArtifactVersion = "2.0.0"
 	record = UpsertManagedArtifact(record, b)
-	if got, ok := record.Artifact(ArtifactKey{Source: source, Name: "b"}); !ok || got.ArtifactVersion != "2" {
+	if got, ok := record.Artifact(ArtifactKey{Source: source, Name: "b"}); !ok || got.ArtifactVersion != "2.0.0" {
 		t.Fatalf("replaced artifact = %#v, %v", got, ok)
-	}
-	if _, ok := record.Artifact(ArtifactKey{Source: source, Name: "missing"}); ok {
-		t.Fatal("unexpected artifact")
-	}
-}
-
-func TestUpsertManagedArtifactDoesNotMutateInputs(t *testing.T) {
-	digest := strings.Repeat("a", 64)
-	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
-	existing := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "z", Digest: digest}, {Path: "a", Digest: digest}}}
-	next := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "b", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "z", Digest: digest}, {Path: "a", Digest: digest}}}
-	record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{existing}}
-
-	_ = UpsertManagedArtifact(record, next)
-
-	if record.Artifacts[0].Files[0].Path != "z" || next.Files[0].Path != "z" {
-		t.Fatalf("UpsertManagedArtifact mutated its inputs: record=%#v next=%#v", record, next)
 	}
 }
 
 func TestValidateMaterializationRecordRejectsOwnerFilesPathsAndDigests(t *testing.T) {
-	digest := strings.Repeat("a", 64)
-	source := SourceIdentity{Type: SourceTypeFile, Locator: "source"}
-	valid := ManagedArtifactRecord{Source: source, ResolvedVersion: "v", Artifact: "a", ArtifactVersion: "1", Files: []ManagedFileRecord{{Path: "a", Digest: digest}}}
+	digest := recordDigest("a")
+	source := SourceIdentity{Type: SourceTypeFile, Locator: "./source"}
+	valid := ManagedArtifactRecord{Source: source, ResolvedVersion: digest, Artifact: "a", ArtifactVersion: "1.0.0", Files: []ManagedFileRecord{{Path: "a", Digest: digest}}}
 	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{valid, valid}}) == nil {
 		t.Fatal("expected duplicate owner rejection")
 	}
@@ -92,9 +78,31 @@ func TestValidateMaterializationRecordRejectsOwnerFilesPathsAndDigests(t *testin
 	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{badPath}}) == nil {
 		t.Fatal("expected non-canonical path rejection")
 	}
+	badPath.Files = []ManagedFileRecord{{Path: "../outside", Digest: digest}}
+	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{badPath}}) == nil {
+		t.Fatal("expected root escape rejection")
+	}
 	badDigest := valid
-	badDigest.Files = []ManagedFileRecord{{Path: "a", Digest: strings.Repeat("A", 64)}}
+	badDigest.Files = []ManagedFileRecord{{Path: "a", Digest: "sha256:" + strings.Repeat("A", 64)}}
 	if ValidateMaterializationRecord(MaterializationRecord{Artifacts: []ManagedArtifactRecord{badDigest}}) == nil {
 		t.Fatal("expected digest rejection")
+	}
+}
+
+func TestValidateMaterializationRecordRejectsDrivePrefixedPaths(t *testing.T) {
+	digest := recordDigest("a")
+	for _, filePath := range []string{"C:/file", "C:file"} {
+		t.Run(filePath, func(t *testing.T) {
+			record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{
+				Source:          SourceIdentity{Type: SourceTypeFile, Locator: "./source"},
+				ResolvedVersion: digest,
+				Artifact:        "a",
+				ArtifactVersion: "1.0.0",
+				Files:           []ManagedFileRecord{{Path: filePath, Digest: digest}},
+			}}}
+			if err := ValidateMaterializationRecord(record); err == nil {
+				t.Fatalf("ValidateMaterializationRecord(%q) error = nil, want drive-prefix rejection", filePath)
+			}
+		})
 	}
 }

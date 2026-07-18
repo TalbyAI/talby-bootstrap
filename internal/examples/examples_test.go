@@ -78,7 +78,7 @@ func TestDiscoverRejectsVerificationFileMismatch(t *testing.T) {
 		"normative_outputs:\n"+
 		"  - expected/exit-code.txt\n"+
 		"  - expected/consumer\n")
-	writeFile(t, filepath.Join(exampleDir, "source", "talby-source.yaml"), ""+
+	writeFile(t, filepath.Join(exampleDir, "source", "tbboot-source.yaml"), ""+
 		"schema_version: 1\n"+
 		"source:\n"+
 		"  name: example\n"+
@@ -129,7 +129,7 @@ func TestDiscoverRejectsInvalidVerificationValue(t *testing.T) {
 		"  consumer_state: absent\n"+
 		"normative_outputs:\n"+
 		"  - expected/exit-code.txt\n")
-	writeFile(t, filepath.Join(exampleDir, "source", "talby-source.yaml"), ""+
+	writeFile(t, filepath.Join(exampleDir, "source", "tbboot-source.yaml"), ""+
 		"schema_version: 1\n"+
 		"source:\n"+
 		"  name: example\n"+
@@ -182,7 +182,7 @@ func TestDiscoverRejectsSourceDescriptorTypeField(t *testing.T) {
 		"  consumer_state: absent\n"+
 		"normative_outputs:\n"+
 		"  - expected/exit-code.txt\n")
-	writeFile(t, filepath.Join(exampleDir, "source", "talby-source.yaml"), ""+
+	writeFile(t, filepath.Join(exampleDir, "source", "tbboot-source.yaml"), ""+
 		"schema_version: 1\n"+
 		"source:\n"+
 		"  name: example\n"+
@@ -198,7 +198,7 @@ func TestDiscoverRejectsSourceDescriptorTypeField(t *testing.T) {
 	if got := err.Error(); got == "" || !containsAll(got,
 		"bad-source-type",
 		"source.type",
-		"talby-source.yaml",
+		"tbboot-source.yaml",
 	) {
 		t.Fatalf("error = %q, want source.type rejection", got)
 	}
@@ -426,14 +426,14 @@ func TestValidateMetadataRejectsEmptyCommandArgv(t *testing.T) {
 
 func TestValidateSourceDescriptorRejectsInvalidYAML(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, "talby-source.yaml")
+	path := filepath.Join(root, "tbboot-source.yaml")
 	writeFile(t, path, "source: [\n")
 
 	err := validateSourceDescriptor(path, "bad-source")
 	if err == nil {
 		t.Fatal("validateSourceDescriptor() error = nil, want parse error")
 	}
-	if got := err.Error(); !containsAll(got, "bad-source", "parse", "talby-source.yaml") {
+	if got := err.Error(); !containsAll(got, "bad-source", "parse", "tbboot-source.yaml") {
 		t.Fatalf("error = %q, want wrapped parse error", got)
 	}
 }
@@ -569,7 +569,7 @@ func writeMinimalExample(t *testing.T, root string, exampleDir string, metadata 
 	writeFile(t, filepath.Join(root, "README.md"), "# Examples\n")
 	writeFile(t, filepath.Join(exampleDir, "README.md"), "# Example\n")
 	writeFile(t, filepath.Join(exampleDir, "example.yaml"), metadata)
-	writeFile(t, filepath.Join(exampleDir, "source", "talby-source.yaml"), ""+
+	writeFile(t, filepath.Join(exampleDir, "source", "tbboot-source.yaml"), ""+
 		"schema_version: 1\n"+
 		"source:\n"+
 		"  name: example\n"+
