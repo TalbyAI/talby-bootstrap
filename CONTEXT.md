@@ -148,6 +148,26 @@ _Avoid_: talby, tboot
 A platform-specific archive that distributes the `tbboot` executable. It is release material for the CLI, not an **Artifact** managed by the CLI.
 _Avoid_: Release artifact, binary artifact
 
+**Release Candidate**:
+The exact commit on `main` proposed for publication as a product release. Its acceptance evidence, distribution packages, and release metadata are all tied to that commit.
+_Avoid_: Latest main, build candidate
+
+**Acceptance Evidence**:
+The executable test, validation result, or explicitly recorded review that demonstrates a retained 0.1 product contract for a Release Candidate.
+_Avoid_: Best-effort check, informal verification
+
+**Acceptance Gate**:
+The blocking condition a Release Candidate must satisfy before publication, based on its required Acceptance Evidence.
+_Avoid_: Advisory check, post-release cleanup
+
+**Acceptance Manifest**:
+The machine-readable record mapping a Release Candidate to its required Acceptance Evidence and gate results.
+_Avoid_: Test log, informal checklist
+
+**Release Owner**:
+The named person accountable for recording candidate acceptance and any explicitly permitted cosmetic or documentation exception.
+_Avoid_: Anonymous approver, automatic approval
+
 **Artifact Management Surface**:
 The user-facing command surface for declaring, reconciling, and materializing **Artifacts** in a target repository or folder.
 _Avoid_: Sync API, artifact internals
