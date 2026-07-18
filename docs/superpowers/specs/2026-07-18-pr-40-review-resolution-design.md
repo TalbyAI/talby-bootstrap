@@ -74,6 +74,7 @@ Ejecutar:
 
 - `gofmt` sobre los archivos Go modificados;
 - `go test ./...`;
+- `just check`;
 - `just check-go`;
 - `just check-md`;
 - `git diff --check HEAD`;

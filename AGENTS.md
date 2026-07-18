@@ -40,9 +40,16 @@ Go code should keep package boundaries shallow and explicit. Follow these conven
 
 ## Testing Guidelines
 
-Run `just check` before submitting changes. For documentation-only changes, `just check-md` is enough. For Go changes, run `just check-go` at minimum.
+Use `just check-md` or `just check-go` during iteration. Before submitting any change, run `just check` once as the final aggregate gate; do not repeat its child tasks in the same final checklist unless separate diagnostics are needed.
 
 When validating a pull request branch, check both pending tracked changes and the committed PR range. Run `git diff --check HEAD` for pending tracked changes and `git diff --check <base>...HEAD` for committed PR changes, replacing `<base>` with the pull request's actual base branch.
+
+### Validation guardrails
+
+- Treat sentence-case headings as a formatting requirement. Markdown code blocks nested under list items must use spaces-only indentation or move to a top-level fence; never create lines with spaces before tabs.
+- In plans and specs, document repository tasks such as `just check`, `just check-md`, `just check-go`, and `just fmt-go` instead of direct `npx markdownlint-cli2` or duplicated final commands.
+- Before reporting completion, run `just check`, `git diff --check HEAD`, and `git diff --check <base>...HEAD`. All must exit successfully; the diff checks must print no output. Report any pre-existing range failure instead of marking validation as passed.
+- For cross-compilation, do not run a foreign `go test` binary on the host. Use `GOOS=<target> go test -c -o <temporary-output> ...` and clean the temporary output with a shell trap.
 
 For CLI changes, test exit codes and stdout/stderr behavior, including JSON mode when applicable. For `internal/` packages, prefer table-free, focused tests that cover both unit seams with fakes and at least one real-path integration-style case when local file resolution or descriptor parsing is central to the behavior.
 

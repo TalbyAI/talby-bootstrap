@@ -10,7 +10,7 @@
 
 **Tech Stack:** Go, `gopkg.in/yaml.v3`, biblioteca estándar `path`, `filepath`, `os`, tests nativos de Go, Markdownlint y `just`.
 
-## Global Constraints
+## Global constraints
 
 - Resolver los 14 comentarios del PR #40; rechazar ninguno.
 - No implementar bloqueo runtime ni reparación manual para `Recovery State`.
@@ -23,7 +23,7 @@
 
 ---
 
-## File Map
+## File map
 
 - Modify `CONTEXT.md`: alinear la definición de `Recovery State` con el alcance 0.1.
 - Modify `UBIQUITOUS_LANGUAGE.md`: quitar relaciones activas de fragmentos del glosario 0.1.
@@ -89,7 +89,7 @@
 
 - [ ] **Step 3: Ejecutar el check documental**
 
-  Run: `npx -y markdownlint-cli2 CONTEXT.md UBIQUITOUS_LANGUAGE.md docs/adr/0005-operation-output-logs-and-exit-codes.md docs/superpowers/plans/2026-07-18-contract-reset.md`
+  Run: `just check-md`
 
   Expected: exit code `0` and no diagnostics.
 
@@ -484,7 +484,13 @@
 
   Expected: PASS on the host platform.
 
-  Run: `GOOS=windows go test ./internal/repositorystate -run '^$'`
+  Run:
+
+  ```sh
+  tmpdir="$(mktemp -d)"
+  trap 'rm -rf "$tmpdir"' EXIT
+  GOOS=windows go test -c -o "$tmpdir/repositorystate.test" ./internal/repositorystate
+  ```
 
   Expected: exit code `0`, confirming compilation of `recovery_windows_test.go` and Windows path code.
 
@@ -561,6 +567,10 @@
   Expected: PASS.
 
 - [ ] **Step 3: Ejecutar checks del repositorio**
+
+  Run: `just check`
+
+  Expected: PASS.
 
   Run: `just check-go`
 
