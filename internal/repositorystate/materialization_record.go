@@ -48,7 +48,7 @@ func ValidateMaterializationRecord(record MaterializationRecord) error {
 		for _, f := range a.Files {
 			native := filepath.FromSlash(f.Path)
 			clean := filepath.ToSlash(filepath.Clean(native))
-			if f.Path == "" || filepath.IsAbs(native) || clean != f.Path || f.Path == "." || f.Path == ".." || strings.HasPrefix(f.Path, "../") || strings.Contains(f.Path, "\\") {
+			if f.Path == "" || filepath.IsAbs(native) || clean != f.Path || f.Path == "." || f.Path == ".." || strings.HasPrefix(f.Path, "../") || strings.Contains(f.Path, "\\") || (len(f.Path) >= 2 && f.Path[1] == ':' && ((f.Path[0] >= 'A' && f.Path[0] <= 'Z') || (f.Path[0] >= 'a' && f.Path[0] <= 'z'))) {
 				return fmt.Errorf("managed file path must be canonical")
 			}
 			if !isSHA256Digest(f.Digest) {

@@ -122,6 +122,22 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 	if err != nil {
 		return Result{}, err
 	}
+	var lock repositorystate.Lockfile
+	var record repositorystate.MaterializationRecord
+	lock, lockPresent, err := service.loadLockfile(ctx, request.Root)
+	if err != nil {
+		return Result{}, err
+	}
+	record, recordPresent, err := service.loadMaterializationRecord(ctx, request.Root)
+	if err != nil {
+		return Result{}, err
+	}
+	if !manifestPresent && (lockPresent || recordPresent) {
+		return Result{}, fmt.Errorf("lockfile and materialization record require a manifest")
+	}
+	if err := repositorystate.ValidateCrossDocumentState(lock, record); err != nil {
+		return Result{}, err
+	}
 	declaration := declarationFor(request, identity)
 	next, kind, err := manifest.AddDeclaration(request.Root, declaration)
 	if err != nil {
@@ -133,25 +149,6 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 	}
 	if !approved(manifest.TrustPolicy, identity) && outsideRoot(identity) {
 		return Result{}, TrustPolicyError{Denied: []repositorystate.SourceIdentity{identity}}
-	}
-	var lock repositorystate.Lockfile
-	var record repositorystate.MaterializationRecord
-	if !request.DeclareOnly {
-		var lockPresent, recordPresent bool
-		lock, lockPresent, err = service.loadLockfile(ctx, request.Root)
-		if err != nil {
-			return Result{}, err
-		}
-		record, recordPresent, err = service.loadMaterializationRecord(ctx, request.Root)
-		if err != nil {
-			return Result{}, err
-		}
-		if !manifestPresent && (lockPresent || recordPresent) {
-			return Result{}, fmt.Errorf("lockfile and materialization record require a manifest")
-		}
-		if err := repositorystate.ValidateCrossDocumentState(lock, record); err != nil {
-			return Result{}, err
-		}
 	}
 	acquire, err := repositorystate.AcquisitionLocator(request.Root, identity)
 	if err != nil {

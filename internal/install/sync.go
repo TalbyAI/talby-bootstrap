@@ -243,8 +243,9 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 		for i, step := range artifact.Descriptor.Steps {
 			observed := observations[i]
 			path := materialize.PathKey(observed.AbsolutePath)
-			for _, name := range []string{repositorystate.ManifestFileName, repositorystate.LockfileFileName, repositorystate.MaterializationRecordFileName} {
-				if observed.Path == name {
+			relativePath := materialize.PathKey(filepath.FromSlash(observed.Path))
+			for _, name := range []string{repositorystate.ManifestFileName, repositorystate.LockfileFileName, repositorystate.MaterializationRecordFileName, repositorystate.RecoveryStateFileName} {
+				if relativePath == materialize.PathKey(filepath.FromSlash(name)) {
 					return nil, nil, fmt.Errorf("target %q is reserved", step.TargetPath)
 				}
 			}
@@ -258,7 +259,7 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 			claimed[path] = artifact
 			digest := materialize.Digest(step.SourceBytes)
 			change := ChangeFileCreated
-			ownerKey := materialize.PathKey(filepath.FromSlash(observed.Path))
+			ownerKey := relativePath
 			if owner, ok := owners[ownerKey]; ok && owner != artifact.Key {
 				conflicts = append(conflicts, Conflict{Kind: ConflictOwnership, Source: artifact.Key.Source, Artifact: artifact.Key.Name, Paths: []string{observed.Path}})
 				continue

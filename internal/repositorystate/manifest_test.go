@@ -22,8 +22,9 @@ func TestNormalizeSourceIdentityStoresRootRelativeAndExternalAbsoluteLocators(t 
 	if err != nil || in.Locator != "./x" {
 		t.Fatalf("in root = %#v, %v", in, err)
 	}
-	out, err := NormalizeSourceIdentity(root, SourceIdentity{Type: SourceTypeFile, Locator: "/tmp/outside"})
-	if err != nil || out.Locator != "/tmp/outside" {
+	external := t.TempDir()
+	out, err := NormalizeSourceIdentity(root, SourceIdentity{Type: SourceTypeFile, Locator: external})
+	if err != nil || out.Locator != filepath.ToSlash(external) {
 		t.Fatalf("external = %#v, %v", out, err)
 	}
 }
@@ -37,6 +38,18 @@ func TestNormalizeSourceIdentityCanonicalizesSymlinkContainment(t *testing.T) {
 	got, err := NormalizeSourceIdentity(root, SourceIdentity{Type: SourceTypeFile, Locator: "linked"})
 	if err != nil || got.Locator != filepath.ToSlash(external) {
 		t.Fatalf("NormalizeSourceIdentity() = %#v, %v, want external canonical locator", got, err)
+	}
+}
+
+func TestNormalizeSourceIdentityCanonicalizesMissingPathThroughSymlink(t *testing.T) {
+	root, external := t.TempDir(), t.TempDir()
+	if err := os.Symlink(external, filepath.Join(root, "linked")); err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+	got, err := NormalizeSourceIdentity(root, SourceIdentity{Type: SourceTypeFile, Locator: "linked/missing"})
+	want := filepath.ToSlash(filepath.Join(external, "missing"))
+	if err != nil || got.Locator != want {
+		t.Fatalf("NormalizeSourceIdentity() = %#v, %v, want %q", got, err, want)
 	}
 }
 

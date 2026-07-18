@@ -49,3 +49,17 @@ func TestValidateCrossDocumentStateRequiresMatchingDeclarationsAndResolutions(t 
 		})
 	}
 }
+
+func TestValidateCrossDocumentStateRejectsRecordWithoutLockResolution(t *testing.T) {
+	version := "sha256:" + strings.Repeat("a", 64)
+	record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{
+		Source:          SourceIdentity{Type: SourceTypeFile, Locator: "./source"},
+		ResolvedVersion: version,
+		Artifact:        "a",
+		ArtifactVersion: "1.0.0",
+		Files:           []ManagedFileRecord{{Path: "a", Digest: version}},
+	}}}
+	if err := ValidateCrossDocumentState(Lockfile{}, record); err == nil {
+		t.Fatal("expected missing lockfile resolution rejection")
+	}
+}

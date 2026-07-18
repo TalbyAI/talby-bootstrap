@@ -33,13 +33,14 @@ func ValidateRecoveryState(root string, state RecoveryState) error {
 	paths := map[string]struct{}{}
 	for _, observation := range state.Observations {
 		path := filepath.FromSlash(observation.Path)
-		if observation.Path == "" || filepath.IsAbs(path) || filepath.ToSlash(filepath.Clean(path)) != observation.Path || observation.Path == "." || strings.HasPrefix(observation.Path, "../") {
+		if observation.Path == "" || filepath.IsAbs(path) || filepath.ToSlash(filepath.Clean(path)) != observation.Path || observation.Path == "." || observation.Path == ".." || strings.HasPrefix(observation.Path, "../") || strings.Contains(observation.Path, "\\") || (len(observation.Path) >= 2 && observation.Path[1] == ':' && ((observation.Path[0] >= 'A' && observation.Path[0] <= 'Z') || (observation.Path[0] >= 'a' && observation.Path[0] <= 'z'))) {
 			return fmt.Errorf("recovery observation path must be canonical and root-relative")
 		}
-		if _, ok := paths[observation.Path]; ok {
+		key := managedPathKey(observation.Path)
+		if _, ok := paths[key]; ok {
 			return fmt.Errorf("recovery observation path must be unique")
 		}
-		paths[observation.Path] = struct{}{}
+		paths[key] = struct{}{}
 		if observation.Result != RecoveryResultRestoreFailed && observation.Result != RecoveryResultVerificationFailed {
 			return fmt.Errorf("unsupported recovery observation result %q", observation.Result)
 		}

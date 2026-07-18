@@ -109,6 +109,41 @@ func TestDeclareOnlyUnsupportedStepAcceptanceAndNoOpWithoutResolve(t *testing.T)
 	}
 }
 
+func TestDeclareOnlyPropagatesLockfileLoadError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, repositorystate.LockfileFileName), []byte("schema_version: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a", DeclareOnly: true})
+	if err == nil {
+		t.Fatal("expected lockfile load error")
+	}
+	if impl.calls != 0 {
+		t.Fatalf("resolve calls = %d, want 0", impl.calls)
+	}
+}
+
+func TestDeclareOnlyRejectsStateWithoutManifest(t *testing.T) {
+	root := t.TempDir()
+	lock := repositorystate.Lockfile{Resolutions: []repositorystate.Resolution{{
+		Source:          repositorystate.SourceIdentity{Type: "file", Locator: "./source"},
+		ResolvedVersion: testSnapshotVersion,
+		Artifacts:       []repositorystate.ArtifactResolution{{Name: "a", Version: "1.0.0"}},
+	}}}
+	if err := repositorystate.NewStore().WriteLockfile(context.Background(), root, lock); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a", DeclareOnly: true})
+	if err == nil || !strings.Contains(err.Error(), "require a manifest") {
+		t.Fatalf("Install() error = %v, want missing-manifest validation", err)
+	}
+	if impl.calls != 0 {
+		t.Fatalf("resolve calls = %d, want 0", impl.calls)
+	}
+}
+
 func TestInstallValidatesRequest(t *testing.T) {
 	service, _ := testService(testResolved())
 	if _, err := service.Install(context.Background(), Request{}); err == nil || !strings.Contains(err.Error(), "repository root") {

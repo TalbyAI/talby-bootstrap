@@ -16,7 +16,7 @@ A **Manifest** stores desired state and enough stable **Source Identity** to re-
 
 A **Resolution** records exact artifact versions and origins. A **Lockfile** persists the **Resolution** and lives beside the **Manifest** in the consumer repository.
 
-For the implemented in-root `file:` path, the Source Version is a deterministic `sha256:` snapshot hash recorded in the Lockfile. Git Source Versions and commits have canonical validation/storage rules, but Git acquisition and version advancement are deferred.
+For 0.1, local `file:` Sources are acquired. In-root Sources are allowed by default, while external absolute Sources require explicit **Manifest** approval of their **Source Identity**. The Source Version is a deterministic `sha256:` snapshot hash recorded in the Lockfile. Git identities and versions have canonical validation/storage rules, but Git acquisition is deferred.
 
 ## Consequences
 

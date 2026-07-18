@@ -56,7 +56,9 @@ func validateYAMLNode(node *yaml.Node) error {
 	if node.Kind == yaml.AliasNode {
 		return fmt.Errorf("YAML aliases are not supported")
 	}
-	if strings.HasPrefix(node.Tag, "!") && !strings.HasPrefix(node.Tag, "!!") {
+	switch node.Tag {
+	case "!!bool", "!!binary", "!!float", "!!int", "!!map", "!!merge", "!!null", "!!seq", "!!str", "!!timestamp":
+	default:
 		return fmt.Errorf("custom YAML tags are not supported")
 	}
 	if node.Tag == "!!null" {

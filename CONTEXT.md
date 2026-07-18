@@ -4,7 +4,7 @@ Talby Bootstrap defines the language for a CLI that installs reusable repository
 
 ## Product 0.1 contract
 
-The 0.1 release is the active contract in this document. It has one implemented command surface: `tbboot install`, including direct scalar `file:<locator>` references, `--artifact`, `--declare-only`, and targetless reconciliation. The implemented acquisition path is an in-root local `file:` Source and the only materialization step is whole-file `file`.
+The 0.1 release is the active contract in this document. It has one implemented command surface: `tbboot install`, including direct scalar `file:<locator>` references, `--artifact`, `--declare-only`, and targetless reconciliation. The implemented acquisition path is local `file:` Sources: in-root Sources are allowed by default, while external absolute Sources require explicit Manifest approval of their **Source Identity**. The only materialization step is whole-file `file`.
 
 All six YAML documents use `schema_version: 1`, strict readers, deterministic writers, and these canonical filenames: `tbboot-source.yaml`, `tbboot-artifact.yaml`, `tbboot-artifacts.yaml`, `tbboot-artifacts.lock.yaml`, `tbboot-artifacts.managed.yaml`, and `tbboot-artifacts.recovery.yaml`. Persisted Source References are scalar `file:<locator>` or `git:<locator>` values; Git identities are stored and validated but not acquired in 0.1. There is no migration from earlier filenames or structured source objects.
 
@@ -37,11 +37,11 @@ A published origin that defines and can deliver one or more **Artifacts** throug
 _Avoid_: Catalog
 
 **Acquisition Channel**:
-The consumer-side mechanism used to obtain a **Source** for resolution, trust evaluation, and locking. 0.1 acquires only in-root `file:` Sources; `git:` is a stored identity for a later acquisition implementation.
+The consumer-side mechanism used to obtain a **Source** for resolution, trust evaluation, and locking. In 0.1, in-root `file:` Sources are allowed by default and external absolute `file:` Sources require explicit Manifest approval of their **Source Identity**; `git:` is a stored identity for a later acquisition implementation.
 _Avoid_: Source kind, published transport, inferred protocol
 
 **Source Type**:
-The explicit classification of an **Acquisition Channel** used in consumer-facing references, **Manifest** entries, trust policy checks, and **Lockfile** resolution records. The persistence contract recognizes `file` and `git`; 0.1 acquisition supports only in-root `file`.
+The explicit classification of an **Acquisition Channel** used in consumer-facing references, **Manifest** entries, trust policy checks, and **Lockfile** resolution records. The persistence contract recognizes `file` and `git`; 0.1 acquires `file` only, with external absolute locators requiring explicit Manifest approval.
 _Avoid_: Published source kind, inferred protocol, source guess
 
 **Source Descriptor**:
@@ -121,7 +121,7 @@ A deferred source-level installation mode where the installed set of artifacts i
 _Avoid_: Floating source, live source
 
 **Trust Policy**:
-The versioned security policy for approved **Source Identity** values. In 0.1, the implemented boundary allows in-root `file:` Sources and does not acquire Git or execute risky materialization steps; broader approval and age rules are deferred.
+The versioned security policy for approved **Source Identity** values. In 0.1, in-root `file:` Sources are allowed by default, while external absolute `file:` Sources require explicit approval; Git is not acquired and risky materialization steps are not executed. Broader approval and age rules are deferred.
 _Avoid_: Machine default, ad hoc flag
 
 **Minimum Age Rule**:
@@ -261,7 +261,7 @@ The explicit conflict state where two **Managed Artifacts** would claim the same
 _Avoid_: Shared ownership, last-write-wins
 
 **Recovery State**:
-The explicit failure state recorded atomically when verified best-effort rollback cannot restore every affected path to its prior observed state. It blocks later mutation of the same consumer repository until manual repair is verified; **Dry Run** may report it but never clears it.
+The explicit failure state recorded atomically when verified best-effort rollback cannot restore every affected path to its prior observed state. **Dry Run** may report it but never clears it.
 _Avoid_: Silent partial failure, implicit dirty state
 
 **Recovery State Filename**:

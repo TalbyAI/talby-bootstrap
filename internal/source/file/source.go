@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -257,6 +258,9 @@ func validateArtifactDescriptor(ref artifactRef, d artifactDescriptor) error {
 	if d.Artifact.Name != ref.Name {
 		return fmt.Errorf("artifact name does not match source descriptor")
 	}
+	if !artifactNamePattern.MatchString(d.Artifact.Name) {
+		return fmt.Errorf("artifact name must be lowercase ASCII hyphenated")
+	}
 	if !semVerPattern.MatchString(d.Artifact.Version) {
 		return fmt.Errorf("artifact version must be canonical SemVer")
 	}
@@ -288,12 +292,16 @@ func validateArtifactDescriptor(ref artifactRef, d artifactDescriptor) error {
 	return nil
 }
 
-func validateRelativePath(path string) error {
-	if path == "" || strings.Contains(path, "\\") || filepath.IsAbs(filepath.FromSlash(path)) {
+func validateRelativePath(value string) error {
+	if value == "" ||
+		strings.Contains(value, "\\") ||
+		path.IsAbs(value) ||
+		(len(value) >= 2 && value[1] == ':' &&
+			((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z'))) {
 		return fmt.Errorf("path must be clean and relative")
 	}
-	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
-	if clean != path || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+	clean := path.Clean(value)
+	if clean != value || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return fmt.Errorf("path must be clean and relative")
 	}
 	return nil

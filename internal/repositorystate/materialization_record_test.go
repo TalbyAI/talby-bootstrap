@@ -88,3 +88,21 @@ func TestValidateMaterializationRecordRejectsOwnerFilesPathsAndDigests(t *testin
 		t.Fatal("expected digest rejection")
 	}
 }
+
+func TestValidateMaterializationRecordRejectsDrivePrefixedPaths(t *testing.T) {
+	digest := recordDigest("a")
+	for _, filePath := range []string{"C:/file", "C:file"} {
+		t.Run(filePath, func(t *testing.T) {
+			record := MaterializationRecord{Artifacts: []ManagedArtifactRecord{{
+				Source:          SourceIdentity{Type: SourceTypeFile, Locator: "./source"},
+				ResolvedVersion: digest,
+				Artifact:        "a",
+				ArtifactVersion: "1.0.0",
+				Files:           []ManagedFileRecord{{Path: filePath, Digest: digest}},
+			}}}
+			if err := ValidateMaterializationRecord(record); err == nil {
+				t.Fatalf("ValidateMaterializationRecord(%q) error = nil, want drive-prefix rejection", filePath)
+			}
+		})
+	}
+}

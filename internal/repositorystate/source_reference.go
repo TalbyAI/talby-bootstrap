@@ -26,6 +26,38 @@ func FormatSourceReference(source SourceIdentity) string {
 	return source.Type + ":" + source.Locator
 }
 
+func evalSymlinksWithMissingSuffix(value string) (string, error) {
+	canonical, err := filepath.EvalSymlinks(value)
+	if err == nil {
+		return canonical, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+	suffix := []string{}
+	candidate := value
+	for {
+		if _, statErr := os.Lstat(candidate); statErr == nil {
+			canonical, evalErr := filepath.EvalSymlinks(candidate)
+			if evalErr != nil {
+				return "", evalErr
+			}
+			for i := len(suffix) - 1; i >= 0; i-- {
+				canonical = filepath.Join(canonical, suffix[i])
+			}
+			return canonical, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			return "", err
+		}
+		suffix = append(suffix, filepath.Base(candidate))
+		candidate = parent
+	}
+}
+
 func NormalizeSourceIdentity(root string, source SourceIdentity) (SourceIdentity, error) {
 	if source.Type != SourceTypeFile && source.Type != SourceTypeGit {
 		return SourceIdentity{}, fmt.Errorf("unsupported source type %q", source.Type)
@@ -57,12 +89,11 @@ func NormalizeSourceIdentity(root string, source SourceIdentity) (SourceIdentity
 		return SourceIdentity{}, err
 	}
 	path = filepath.Clean(path)
-	canonical, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		path = canonical
-	} else if !os.IsNotExist(err) {
+	canonical, err := evalSymlinksWithMissingSuffix(path)
+	if err != nil {
 		return SourceIdentity{}, err
 	}
+	path = canonical
 	rel, err := filepath.Rel(base, path)
 	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		if rel == "." {

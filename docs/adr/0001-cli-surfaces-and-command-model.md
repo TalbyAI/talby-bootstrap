@@ -22,7 +22,7 @@ Explicit source installs use:
 tbboot install <source-ref> [--artifact <artifact-name>]
 ```
 
-The direct source form is `tbboot install <source-ref> [--artifact <artifact-name>]`, where the current implementation acquires an in-root `file:` Source and accepts whole-file `file` steps. Invalid or unsupported references fail before mutation.
+The direct source form is `tbboot install <source-ref> [--artifact <artifact-name>]`, where 0.1 acquires local `file:` Sources: in-root Sources are allowed by default, while external absolute Sources require explicit **Manifest** approval of their **Source Identity**. Git identities and versions are stored and validated, but Git acquisition is deferred. Invalid or unsupported references fail before mutation.
 
 `--declare-only` updates only the **Manifest** and does not materialize artifacts, update the **Lockfile**, or touch cache state.
 

@@ -27,7 +27,10 @@ func TestRecoveryStateRoundTripsSortedSanitizedObservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "source: file:./source") || strings.Index(string(data), "path: a") > strings.Index(string(data), "path: z") {
+	text := string(data)
+	aIndex := strings.Index(text, "path: a")
+	zIndex := strings.Index(text, "path: z")
+	if !strings.Contains(text, "source: file:./source") || aIndex < 0 || zIndex < 0 || aIndex > zIndex {
 		t.Fatalf("recovery YAML = %s", data)
 	}
 	got, err := store.LoadRecoveryState(context.Background(), root)
@@ -46,6 +49,10 @@ func TestValidateRecoveryStateRejectsRawErrorAndUnsafeObservation(t *testing.T) 
 		{Code: "raw error", Summary: "safe", Observations: valid.Observations},
 		{Code: valid.Code, Summary: "line\nbreak", Observations: valid.Observations},
 		{Code: valid.Code, Summary: valid.Summary, Observations: []RecoveryObservation{{Path: "../file", Result: RecoveryResultRestoreFailed, ExpectedState: RecoveryExpectedAbsent}}},
+		{Code: valid.Code, Summary: valid.Summary, Observations: []RecoveryObservation{{Path: "..", Result: RecoveryResultRestoreFailed, ExpectedState: RecoveryExpectedAbsent}}},
+		{Code: valid.Code, Summary: valid.Summary, Observations: []RecoveryObservation{{Path: "dir\\file", Result: RecoveryResultRestoreFailed, ExpectedState: RecoveryExpectedAbsent}}},
+		{Code: valid.Code, Summary: valid.Summary, Observations: []RecoveryObservation{{Path: "C:/file", Result: RecoveryResultRestoreFailed, ExpectedState: RecoveryExpectedAbsent}}},
+		{Code: valid.Code, Summary: valid.Summary, Observations: []RecoveryObservation{{Path: "C:file", Result: RecoveryResultRestoreFailed, ExpectedState: RecoveryExpectedAbsent}}},
 	} {
 		if err := ValidateRecoveryState(root, invalid); err == nil {
 			t.Fatalf("ValidateRecoveryState(%#v) unexpectedly succeeded", invalid)

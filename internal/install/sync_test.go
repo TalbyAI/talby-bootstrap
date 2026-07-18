@@ -234,7 +234,7 @@ func hasConflict(result Result, kind ConflictKind) bool {
 	return false
 }
 func TestSyncRejectsReservedAndActiveSourceInputTargets(t *testing.T) {
-	for _, target := range []string{repositorystate.ManifestFileName, "input"} {
+	for _, target := range []string{repositorystate.ManifestFileName, repositorystate.RecoveryStateFileName, "input"} {
 		root := t.TempDir()
 		syncManifest(t, root, artifactDeclaration("a"))
 		resolved := testResolved(testArtifact("a", target))
@@ -402,18 +402,22 @@ func TestSyncRejectsManagedVersionAndPathSetMismatch(t *testing.T) {
 		t.Fatal("Sync() error = nil")
 	}
 }
-func TestSyncReconstructsMissingLockOnlyOnExactManagedMatch(t *testing.T) {
+func TestSyncRejectsMissingLockWithManagedRecord(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root, artifactDeclaration("a"))
-	service, _ := testService(testResolved(testArtifact("a", "a")))
+	service, impl := testService(testResolved(testArtifact("a", "a")))
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(root, repositorystate.LockfileFileName)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil || !hasChange(got, ChangeResolutionLocked) {
-		t.Fatalf("Sync() = %#v, %v", got, err)
+	impl.calls = 0
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err == nil || !strings.Contains(err.Error(), "does not match a lockfile resolution") {
+		t.Fatalf("Sync() error = %v, want cross-document validation", err)
+	}
+	if impl.calls != 0 {
+		t.Fatalf("Resolve calls = %d, want 0", impl.calls)
 	}
 }
 

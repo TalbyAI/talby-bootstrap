@@ -161,9 +161,43 @@ func TestEncodeDescriptorsIsDeterministicAndCanonical(t *testing.T) {
 	}
 }
 
+func TestEncodeArtifactDescriptorRejectsInvalidArtifactName(t *testing.T) {
+	_, err := EncodeArtifactDescriptor(ArtifactDescriptor{
+		Name:    "A",
+		Version: "1.0.0",
+		Steps:   []ArtifactStep{{Type: "file", Path: "out", Source: "in"}},
+	})
+	if err == nil {
+		t.Fatal("EncodeArtifactDescriptor() error = nil, want invalid artifact name rejection")
+	}
+}
+
 func TestCapabilitiesProvideIdentity(t *testing.T) {
 	if !New().Capabilities().ProvidesIdentity {
 		t.Fatal("file source must provide identity")
+	}
+}
+
+func TestValidateRelativePathUsesPortableRules(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+		valid bool
+	}{
+		{name: "nested relative", value: "dir/file", valid: true},
+		{name: "windows drive", value: "C:/outside"},
+		{name: "backslash", value: `dir\\file`},
+		{name: "parent", value: "../outside"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRelativePath(test.value)
+			if test.valid && err != nil {
+				t.Fatalf("validateRelativePath(%q) = %v", test.value, err)
+			}
+			if !test.valid && err == nil {
+				t.Fatalf("validateRelativePath(%q) unexpectedly succeeded", test.value)
+			}
+		})
 	}
 }
 

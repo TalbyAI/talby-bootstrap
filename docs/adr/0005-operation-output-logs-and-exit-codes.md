@@ -1,4 +1,4 @@
-# ADR-0005: Operation Output and Exit Codes
+# ADR-0005: Operation output and exit codes
 
 ## Status
 

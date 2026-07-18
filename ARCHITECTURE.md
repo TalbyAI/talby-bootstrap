@@ -4,7 +4,7 @@ This document is the entry point for the Talby Bootstrap 0.1 architecture. `CONT
 
 ## Product 0.1 boundary
 
-The 0.1 implementation publishes six strict schema-version-1 YAML documents with canonical `tbboot-` filenames. Consumer-facing and persisted Source References are scalar `file:<locator>` or `git:<locator>` values. The implemented acquisition path is an in-root `file:` Source with whole-file `file` materialization steps.
+The 0.1 implementation publishes six strict schema-version-1 YAML documents with canonical `tbboot-` filenames. Consumer-facing and persisted Source References are scalar `file:<locator>` or `git:<locator>` values. The implemented acquisition path is local `file:` Sources: in-root Sources are allowed by default, while external absolute Sources require explicit Manifest approval of their Source Identity. Materialization uses whole-file `file` steps.
 
 Git identity storage is present for the contract, but Git acquisition is deferred. Catalogs, search, upgrade, executable or prompt-driven steps, fragment/template rendering, durable rollback lifecycle, and persisted operation logs are outside 0.1 and must not be represented as successful CLI behavior.
 
@@ -16,7 +16,7 @@ The architecture is organized around five stable responsibilities:
 
 - **Command surface**: parses the implemented `install` command into explicit user intent; later command surfaces remain separate tickets.
 - **Resolution**: turns a **Manifest** and install target into an exact **Resolution** recorded in a **Lockfile**.
-- **Trust policy**: applies the current file-source boundary before writes happen; broader source and step policy is deferred.
+- **Trust policy**: allows in-root local Sources by default and requires Manifest approval for external absolute local Source Identities before writes; broader source and step policy is deferred.
 - **Materialization**: applies whole-file `file` steps and tracks the existing ownership record.
 - **Operation reporting**: emits the current human and machine-readable install results.
 
@@ -31,10 +31,10 @@ The architecture is organized around five stable responsibilities:
 ## Non-functional requirements
 
 - Reproducibility: resolved versions are recorded in a versioned **Lockfile**.
-- Safety: the current install path is limited to in-root local Sources and whole-file steps.
+- Safety: in-root local Sources are allowed by default; external absolute local Sources require explicit approval, and materialization uses whole-file steps.
 - Auditability: managed changes report provenance in immediate operation output.
 - Predictability: scalar Source References and strict YAML fail before mutation when invalid.
-- Minimal 0.1 scope: YAML is the only manifest format; only the in-root `file:` path is acquired.
+- Minimal 0.1 scope: YAML is the only manifest format; only `file:` Sources are acquired.
 
 ## Deferred beyond 0.1
 

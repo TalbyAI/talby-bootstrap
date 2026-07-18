@@ -233,7 +233,12 @@ func TestStoreWriteReportsMissingRoot(t *testing.T) {
 	if err := store.WriteMaterializationRecord(context.Background(), root, MaterializationRecord{}); err == nil {
 		t.Fatal("expected materialization record write failure")
 	}
-	if err := store.WriteRecoveryState(context.Background(), root, RecoveryState{}); err == nil {
+	state := RecoveryState{
+		Code:         RecoveryCodeRollbackIncomplete,
+		Summary:      "rollback incomplete",
+		Observations: []RecoveryObservation{{Path: "file", Result: RecoveryResultRestoreFailed, ExpectedState: RecoveryExpectedAbsent}},
+	}
+	if err := store.WriteRecoveryState(context.Background(), root, state); err == nil {
 		t.Fatal("expected recovery write failure")
 	}
 }

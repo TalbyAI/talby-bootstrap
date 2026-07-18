@@ -2,7 +2,7 @@
 
 `CONTEXT.md` is the source of truth for the Talby Bootstrap 0.1 product contract. This document is the compact glossary used by architecture, ADRs, and implementation work.
 
-In 0.1, the active materialization step type is whole-file `file`, the active acquired Source path is in-root `file:`, and the CLI surface is `install`. `git:` references are stored as contract data but not acquired yet. Catalog, search, upgrade, fragment, template, script, and prompt terms describe deferred capabilities rather than implemented 0.1 behavior.
+In 0.1, the active materialization step type is whole-file `file`, and the CLI surface is `install`. In-root `file:` Sources are allowed by default; external absolute `file:` Sources require explicit Manifest approval of their **Source Identity**. `git:` references are stored as contract data but not acquired yet. Catalog, search, upgrade, fragment, template, script, and prompt terms describe deferred capabilities rather than implemented 0.1 behavior.
 
 ## Artifact publication
 
@@ -18,7 +18,7 @@ In 0.1, the active materialization step type is whole-file `file`, the active ac
 
 - **Source**: A published origin that defines and can deliver one or more **Artifacts**.
   Avoid: Catalog
-- **Acquisition Channel**: The consumer-side mechanism used to obtain a **Source** for resolution, trust, and locking; 0.1 acquires only in-root `file:`, while `git:` identity storage is reserved for a later acquisition ticket.
+- **Acquisition Channel**: The consumer-side mechanism used to obtain a **Source** for resolution, trust, and locking; 0.1 acquires `file:` Sources, allowing in-root Sources by default and external absolute Sources with explicit Manifest approval, while `git:` identity storage is reserved for a later acquisition ticket.
   Avoid: Published transport, source kind
 - **Source Type**: The explicit classification of an **Acquisition Channel** used in references, manifests, and lockfiles.
   Avoid: Inferred protocol, published source kind
@@ -43,7 +43,7 @@ In 0.1, the active materialization step type is whole-file `file`, the active ac
 
 ## Policy and safety
 
-- **Trust Policy**: The versioned security policy controlling approved **Source Identity** values; broader step-type and age constraints are deferred beyond 0.1.
+- **Trust Policy**: The versioned security policy controlling approved external **Source Identity** values; in-root `file:` Sources are allowed by default, while broader step-type and age constraints are deferred beyond 0.1.
   Avoid: Machine default, ad hoc flag
 - **Minimum Age Rule**: A trust constraint rejecting resolved targets that are newer than the configured age threshold.
   Avoid: Source age, catalog age
@@ -78,7 +78,6 @@ In 0.1, the active materialization step type is whole-file `file`, the active ac
 - The stable identity of an acquired source is its **Source Identity**, not its published descriptor alone.
 - A **Manifest** declares intent; a **Resolution** makes it exact; a **Lockfile** records it.
 - A **Catalog** indexes **Sources** but is not source of truth for artifacts.
-- A **Managed Artifact** owns whole files or bounded **Fragments** through its **Materialization Record**.
 - **Sync** reconciles the target repository against the **Manifest** and **Lockfile**.
 - **Trust Policy** is checked against **Source Identity** before materialization writes.
 

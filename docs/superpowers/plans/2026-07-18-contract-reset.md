@@ -1,4 +1,4 @@
-# 0.1 Contract Reset Implementation Plan
+# 0.1 contract reset implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -149,6 +149,7 @@
 - Verify all changed files from Tasks 1–5.
 
 - [x] Run `git diff --check HEAD`.
+- [x] Run `git diff --check main...HEAD`.
 - [x] Run `just check-go` and `just check-md`.
 - [x] Run `just check` and inspect the complete output.
 - [x] Re-read the design and this plan, then verify every acceptance criterion for issue #30 against code, tests, and fixtures.
