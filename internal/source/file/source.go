@@ -139,11 +139,15 @@ func realParentDirs(root *os.Root, relative string) error {
 	return nil
 }
 
-func realDir(root *os.Root, relative string) error {
+func lstatSourceEntry(root *os.Root, relative string) (os.FileInfo, error) {
 	if err := realParentDirs(root, relative); err != nil {
-		return err
+		return nil, err
 	}
-	info, err := root.Lstat(relative)
+	return root.Lstat(relative)
+}
+
+func realDir(root *os.Root, relative string) error {
+	info, err := lstatSourceEntry(root, relative)
 	if err != nil {
 		return err
 	}
@@ -154,10 +158,7 @@ func realDir(root *os.Root, relative string) error {
 }
 
 func readRealFile(root *os.Root, relative string) ([]byte, error) {
-	if err := realParentDirs(root, relative); err != nil {
-		return nil, err
-	}
-	info, err := root.Lstat(relative)
+	info, err := lstatSourceEntry(root, relative)
 	if err != nil {
 		return nil, err
 	}

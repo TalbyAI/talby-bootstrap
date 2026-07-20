@@ -142,8 +142,7 @@ func SamePathIdentity(observed Observation, path string) (bool, error) {
 func sameFileIdentity(a, b os.FileInfo) bool {
 	return a == nil && b == nil || a != nil && b != nil && os.SameFile(a, b)
 }
-func Revalidate(observed Observation) error {
-	current, err := Observe(observed.Root, observed.Path)
+func validateObservation(observed, current Observation, err error) error {
 	if err != nil {
 		var parent targetParentError
 		if errors.As(err, &parent) {
@@ -155,6 +154,10 @@ func Revalidate(observed Observation) error {
 		return ChangedSincePreflightError{Path: observed.Path}
 	}
 	return nil
+}
+func Revalidate(observed Observation) error {
+	current, err := Observe(observed.Root, observed.Path)
+	return validateObservation(observed, current, err)
 }
 func Write(observed Observation, content []byte) error {
 	root, err := os.OpenRoot(observed.Root)
@@ -219,17 +222,7 @@ func writeRooted(root *os.Root, observed Observation, content []byte) error {
 }
 func revalidateRoot(root *os.Root, observed Observation) error {
 	current, err := observeRooted(root, observed.Root, filepath.FromSlash(observed.Path))
-	if err != nil {
-		var parent targetParentError
-		if errors.As(err, &parent) {
-			return ChangedSincePreflightError{Path: observed.Path}
-		}
-		return err
-	}
-	if !SameObservation(observed, current) {
-		return ChangedSincePreflightError{Path: observed.Path}
-	}
-	return nil
+	return validateObservation(observed, current, err)
 }
 func createTemp(root *os.Root, base string) (*os.File, string, error) {
 	for range 100 {
