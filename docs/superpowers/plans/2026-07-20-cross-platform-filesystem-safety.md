@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.26.4, standard-library os.Root, os, filepath, os/exec, and os.SameFile; existing Cobra CLI and Go testing; no new dependencies.
 
-## Global Constraints
+## Global constraints
 
 - Every mutating install operation uses one canonical Operation Root.
 - An exclusive .tbboot-operation.lock directory in the Operation Root is the cross-platform lock.

@@ -3,7 +3,7 @@ name: session-assumptions
 description: Analyze the current conversation/session and list agent-made assumptions, inferred decisions, defaults, or interpretations that shaped the result but were not explicitly present in the user's instructions, supplied documents, AGENTS.md, repository context, codebase, or tool outputs. Use when the user invokes $session-assumptions, asks what assumptions were made, asks what decisions the agent introduced, or wants a flat reviewable list of unstated choices behind the current session output.
 ---
 
-# Session Assumptions
+# Session assumptions
 
 Surface agent-added choices that merit discussion; provide the full inventory
 when requested.
