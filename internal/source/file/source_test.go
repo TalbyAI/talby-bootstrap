@@ -113,6 +113,47 @@ func TestResolveRejectsStepInputSymlinkEscapingArtifactRoot(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsSymlinkedSourceDescriptorInsideRoot(t *testing.T) {
+	root := fixture(t)
+	if err := os.Rename(filepath.Join(root, "tbboot-source.yaml"), filepath.Join(root, "other.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("other.yaml", filepath.Join(root, "tbboot-source.yaml")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Type: "file", Locator: root}}); err == nil {
+		t.Fatal("Resolve() accepted symlinked source descriptor")
+	}
+}
+
+func TestResolveRejectsSymlinkedInputEvenWhenItStaysInsideRoot(t *testing.T) {
+	root := fixture(t)
+	input := filepath.Join(root, "a", "in")
+	if err := os.Remove(input); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("other", input); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	write(t, filepath.Join(root, "a", "other"), "captured\n")
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Type: "file", Locator: root}}); err == nil {
+		t.Fatal("Resolve() accepted symlinked source input")
+	}
+}
+
+func TestResolveRejectsSymlinkedArtifactDirectoryInsideRoot(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(outside, "tbboot-artifact.yaml"), "schema_version: 1\nartifact:\n  name: a\n  version: 1.0.0\nsteps:\n  - type: file\n    path: out\n    source: in\n")
+	write(t, filepath.Join(outside, "in"), "captured\n")
+	write(t, filepath.Join(root, "tbboot-source.yaml"), "schema_version: 1\nartifacts:\n  - name: a\n    path: a\n")
+	if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if _, err := New().Resolve(context.Background(), source.ResolveRequest{Ref: source.Ref{Type: "file", Locator: root}}); err == nil {
+		t.Fatal("Resolve() accepted symlinked artifact directory")
+	}
+}
+
 func TestResolveRejectsSourceDescriptorSymlinkEscapingSourceRoot(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	write(t, filepath.Join(outside, "source.yaml"), "schema_version: 1\nartifacts: []\n")

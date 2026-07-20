@@ -3,10 +3,13 @@ package tbboot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -20,6 +23,7 @@ import (
 func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra.Command {
 	var artifact string
 	var declareOnly bool
+	var dryRun bool
 	service := installsvc.NewService(
 		source.NewStaticRegistry(map[string]source.Source{
 			"file": sourcefile.New(),
@@ -41,7 +45,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 				if err != nil {
 					return err
 				}
-				result, err := service.Sync(ctx, installsvc.SyncRequest{Root: root})
+				result, err := service.Sync(ctx, installsvc.SyncRequest{Root: root, DryRun: dryRun})
 				if err != nil {
 					return err
 				}
@@ -64,6 +68,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 				Source:      ref,
 				Artifact:    artifact,
 				DeclareOnly: declareOnly,
+				DryRun:      dryRun,
 			})
 			if err != nil {
 				return err
@@ -82,6 +87,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 
 	cmd.Flags().StringVar(&artifact, "artifact", "", "artifact to install")
 	cmd.Flags().BoolVar(&declareOnly, "declare-only", false, "declare artifact intent without materializing files")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report changes without writing files or state")
 	return cmd
 }
 
@@ -89,6 +95,7 @@ func resultEnvelope(message string, result installsvc.Result) app.Result {
 	details := map[string]any{
 		"operation":      result.Operation,
 		"outcome":        result.Outcome,
+		"dry_run":        result.DryRun,
 		"artifact_count": result.ArtifactCount,
 	}
 	if len(result.Changes) != 0 {
@@ -105,7 +112,11 @@ func writeResult(stdout io.Writer, result installsvc.Result) error {
 		_, err := fmt.Fprintf(stdout, "%s: no changes (%d artifacts)\n", result.Operation, result.ArtifactCount)
 		return err
 	}
-	if _, err := fmt.Fprintf(stdout, "%s: applied %d changes (%d artifacts)\n", result.Operation, len(result.Changes), result.ArtifactCount); err != nil {
+	label := "applied"
+	if result.Outcome == installsvc.OutcomePlanned {
+		label = "planned"
+	}
+	if _, err := fmt.Fprintf(stdout, "%s: %s %d changes (%d artifacts)\n", result.Operation, label, len(result.Changes), result.ArtifactCount); err != nil {
 		return err
 	}
 	for _, change := range result.Changes {
@@ -141,22 +152,72 @@ func parseSourceRef(raw string) (source.Ref, error) {
 	}, nil
 }
 
+type gitRunner func(context.Context, string) ([]byte, []byte, error)
+
+const nonRepositoryGitDiagnostic = "fatal: not a git repository (or any of the parent directories): .git"
+
 func repositoryRoot(ctx context.Context) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
+	return repositoryRootAt(ctx, cwd, runGit)
+}
 
+func runGit(ctx context.Context, cwd string) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	cmd.Dir = cwd
-	output, err := cmd.Output()
+	cmd.Env = stableGitEnvironment(os.Environ())
+	stdout, err := cmd.Output()
+	if err == nil {
+		return stdout, nil, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return nil, exitErr.Stderr, err
+	}
+	return nil, nil, err
+}
+
+func stableGitEnvironment(environment []string) []string {
+	filtered := make([]string, 0, len(environment)+1)
+	for _, value := range environment {
+		name, _, _ := strings.Cut(value, "=")
+		if !isLCAllEnvironmentName(name) {
+			filtered = append(filtered, value)
+		}
+	}
+	return append(filtered, "LC_ALL=C")
+}
+
+func isLCAllEnvironmentName(name string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(name, "LC_ALL")
+	}
+	return name == "LC_ALL"
+}
+
+func repositoryRootAt(ctx context.Context, cwd string, run gitRunner) (string, error) {
+	stdout, stderr, err := run(ctx, cwd)
 	if err != nil {
-		return cwd, nil //nolint:nilerr // fall back to cwd outside a git repository
+		if strings.TrimSpace(string(stderr)) != nonRepositoryGitDiagnostic {
+			return "", fmt.Errorf("discover repository root: %w", err)
+		}
+		return canonicalPath(cwd)
 	}
 
-	root := strings.TrimSpace(string(output))
-	if root == "" {
-		return cwd, nil
+	root := strings.TrimSuffix(string(stdout), "\n")
+	root = strings.TrimSuffix(root, "\r")
+	if root == "" || strings.ContainsAny(root, "\r\n") {
+		return "", fmt.Errorf("git returned malformed repository root")
 	}
-	return root, nil
+	return canonicalPath(root)
+}
+
+func canonicalPath(value string) (string, error) {
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(filepath.Clean(absolute))
 }

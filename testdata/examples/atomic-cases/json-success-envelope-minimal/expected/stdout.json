@@ -4,6 +4,7 @@
   "details": {
     "operation": "install",
     "outcome": "applied",
+    "dry_run": false,
     "artifact_count": 1,
     "changes": [
       {

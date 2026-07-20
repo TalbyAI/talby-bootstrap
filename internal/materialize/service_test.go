@@ -41,6 +41,34 @@ func TestWriteRejectsChangedTargetSinceObservation(t *testing.T) {
 	}
 }
 
+func TestWriteRejectsReplacedTargetWithSameBytesAndMode(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "README.md")
+	if err := os.WriteFile(path, []byte("same"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := Observe(root, "README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(root, "replacement")
+	if err := os.WriteFile(replacement, []byte("same"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Write(observed, []byte("desired"))
+	var changed ChangedSincePreflightError
+	if !errors.As(err, &changed) {
+		t.Fatalf("Write() error = %T %v, want ChangedSincePreflightError", err, err)
+	}
+}
+
 func TestWriteClassifiesParentTopologyRaceAsChanged(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	observed, err := Observe(root, "parent/target")
@@ -55,6 +83,33 @@ func TestWriteClassifiesParentTopologyRaceAsChanged(t *testing.T) {
 	var changed ChangedSincePreflightError
 	if !errors.As(err, &changed) {
 		t.Fatalf("Write() error = %T %v, want ChangedSincePreflightError", err, err)
+	}
+}
+
+func TestWriteRejectsReplacedTargetParent(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := Observe(root, "parent/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := parent + "-moved"
+	if err := os.Rename(parent, moved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var changed ChangedSincePreflightError
+	if err := Write(observed, []byte("content")); !errors.As(err, &changed) {
+		t.Fatalf("Write() error = %T %v, want parent identity drift", err, err)
+	}
+	if _, err := os.Stat(filepath.Join(parent, "file")); !os.IsNotExist(err) {
+		t.Fatalf("replacement parent target error = %v, want not exist", err)
 	}
 }
 
@@ -207,7 +262,30 @@ func TestObserveRejectsTargetsOutsideRootAndInvalidRoot(t *testing.T) {
 	}
 }
 
-func TestObserveRejectsRegularFileAsParent(t *testing.T) {
+func TestObserveCapturesHardLinkIdentity(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "first")
+	second := filepath.Join(root, "second")
+	if err := os.WriteFile(first, []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(first, second); err != nil {
+		t.Skipf("hard link: %v", err)
+	}
+	a, err := Observe(root, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Observe(root, "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !SameEntryIdentity(a, b) {
+		t.Fatal("hard-link observations have different identities")
+	}
+}
+
+func TestObserveRejectsSpecialTargetParent(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "parent"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)

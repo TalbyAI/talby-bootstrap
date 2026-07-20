@@ -355,3 +355,210 @@ func TestInstallRejectsLockedMismatchUnsupportedStepAndFileConflict(t *testing.T
 		t.Fatalf("conflict error = %T %v", err, err)
 	}
 }
+
+func TestInstallRejectsLockedOperationBeforeDependencies(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, operationLockName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	store := &countingStore{Store: repositorystate.NewStore()}
+	service.store = store
+
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"})
+	if err == nil || !strings.Contains(err.Error(), "already locked") {
+		t.Fatalf("Install() error = %v, want operation lock conflict", err)
+	}
+	if impl.calls != 0 || store.loadManifestCalls != 0 || store.loadLockfileCalls != 0 || store.loadRecordCalls != 0 {
+		t.Fatalf("dependencies reached: resolve=%d manifest=%d lock=%d record=%d", impl.calls, store.loadManifestCalls, store.loadLockfileCalls, store.loadRecordCalls)
+	}
+}
+
+func TestDryRunContracts(t *testing.T) {
+	request := Request{DryRun: true}
+	syncRequest := SyncRequest{DryRun: true}
+	if !request.DryRun || !syncRequest.DryRun {
+		t.Fatal("DryRun request fields missing")
+	}
+	if got := (Result{Outcome: OutcomePlanned, DryRun: true}); got.Outcome != OutcomePlanned || !got.DryRun {
+		t.Fatalf("planned result = %#v", got)
+	}
+	if got := resultForConflicts("install", 1, []Conflict{{}}, true); !got.DryRun || got.Outcome != OutcomeConflict {
+		t.Fatalf("conflict result = %#v", got)
+	}
+}
+
+func TestInstallDryRunWritesNothingAndDoesNotCreateLock(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "source"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+
+	result, err := service.Install(context.Background(), Request{
+		Root:   root,
+		Source: source.Ref{Type: "file", Locator: "./source"},
+		DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != OutcomePlanned || !result.DryRun {
+		t.Fatalf("result = %#v, want planned dry run", result)
+	}
+	for _, name := range []string{
+		repositorystate.ManifestFileName,
+		repositorystate.LockfileFileName,
+		repositorystate.MaterializationRecordFileName,
+		operationLockName,
+	} {
+		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s exists after dry run: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "a")); !os.IsNotExist(err) {
+		t.Fatalf("target exists after dry run: %v", err)
+	}
+}
+
+func TestInstallDeclarationOnlyDryRunDoesNotCreateManifest(t *testing.T) {
+	root := t.TempDir()
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+
+	result, err := service.Install(context.Background(), Request{
+		Root:        root,
+		Source:      source.Ref{Type: "file", Locator: "./source"},
+		Artifact:    "a",
+		DeclareOnly: true,
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != OutcomePlanned || !result.DryRun || !hasChange(result, ChangeDeclarationAdded) {
+		t.Fatalf("result = %#v, want planned declaration", result)
+	}
+	if _, err := os.Stat(filepath.Join(root, repositorystate.ManifestFileName)); !os.IsNotExist(err) {
+		t.Fatalf("manifest exists after dry run: %v", err)
+	}
+}
+
+func TestInstallDeclarationOnlyDryRunNoOpMarksResult(t *testing.T) {
+	root := t.TempDir()
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+	request := Request{
+		Root:        root,
+		Source:      source.Ref{Type: "file", Locator: "./source"},
+		Artifact:    "a",
+		DeclareOnly: true,
+	}
+	if _, err := service.Install(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+
+	request.DryRun = true
+	result, err := service.Install(context.Background(), request)
+	if err != nil || result.Outcome != OutcomeNoOp || !result.DryRun {
+		t.Fatalf("result = %#v, error = %v; want dry-run no-op", result, err)
+	}
+}
+
+func TestInstallJoinsLockReleaseError(t *testing.T) {
+	root := t.TempDir()
+	impl := &testSource{resolve: func(source.ResolveRequest) (source.ResolvedSource, error) {
+		if err := os.RemoveAll(filepath.Join(root, operationLockName)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(root, operationLockName), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, operationLockName, "block-removal"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return source.ResolvedSource{}, errors.New("resolve failed")
+	}}
+	service := NewService(source.NewStaticRegistry(map[string]source.Source{"file": impl}), repositorystate.NewStore())
+
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}})
+	if err == nil || !strings.Contains(err.Error(), "resolve failed") || !strings.Contains(err.Error(), "release operation lock") {
+		t.Fatalf("Install() error = %v, want operation and release errors", err)
+	}
+}
+
+func TestPreflightRejectsHardLinkAliasTargets(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "first")
+	second := filepath.Join(root, "second")
+	if err := os.WriteFile(first, []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(first, second); err != nil {
+		t.Skipf("hard link: %v", err)
+	}
+	desired := []desiredArtifact{
+		{Key: repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source-a"}, Name: "a"}, Descriptor: testArtifact("a", "first")},
+		{Key: repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source-b"}, Name: "b"}, Descriptor: testArtifact("b", "second")},
+	}
+	desired[0].Descriptor.Steps[0].SourceBytes = []byte("same")
+	desired[1].Descriptor.Steps[0].SourceBytes = []byte("same")
+
+	_, conflicts, err := preflightFiles(root, desired, repositorystate.MaterializationRecord{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) == 0 || conflicts[0].Kind != ConflictOwnership {
+		t.Fatalf("conflicts = %#v, want hard-link ownership conflict", conflicts)
+	}
+}
+
+func TestPreflightRejectsHardLinkToManagedTarget(t *testing.T) {
+	root := t.TempDir()
+	managed := filepath.Join(root, "managed")
+	if err := os.WriteFile(managed, []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(managed, filepath.Join(root, "alias")); err != nil {
+		t.Skipf("hard link: %v", err)
+	}
+	desired := []desiredArtifact{{
+		Key:        repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source-b"}, Name: "b"},
+		Descriptor: testArtifact("b", "alias"),
+	}}
+	desired[0].Descriptor.Steps[0].SourceBytes = []byte("same")
+	record := repositorystate.MaterializationRecord{Artifacts: []repositorystate.ManagedArtifactRecord{{
+		Source:          repositorystate.SourceIdentity{Type: "file", Locator: "source-a"},
+		ResolvedVersion: testSnapshotVersion,
+		Artifact:        "a",
+		ArtifactVersion: "1.0.0",
+		Files:           []repositorystate.ManagedFileRecord{{Path: "managed", Digest: "unused"}},
+	}}}
+
+	_, conflicts, err := preflightFiles(root, desired, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) == 0 || conflicts[0].Kind != ConflictOwnership {
+		t.Fatalf("conflicts = %#v, want managed hard-link ownership conflict", conflicts)
+	}
+}
+
+func TestPreflightRejectsHardLinkToSourceInput(t *testing.T) {
+	root := t.TempDir()
+	input := filepath.Join(root, "input")
+	if err := os.WriteFile(input, []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(input, filepath.Join(root, "target")); err != nil {
+		t.Skipf("hard link: %v", err)
+	}
+	desired := []desiredArtifact{{
+		Key:        repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Name: "a"},
+		Descriptor: testArtifact("a", "target"),
+		InputPaths: []string{input},
+	}}
+	desired[0].Descriptor.Steps[0].SourceBytes = []byte("same")
+
+	if _, _, err := preflightFiles(root, desired, repositorystate.MaterializationRecord{}); err == nil || !strings.Contains(err.Error(), "overlaps source input") {
+		t.Fatalf("preflightFiles() error = %v, want source input overlap", err)
+	}
+}

@@ -16,13 +16,18 @@ type Request struct {
 	Source      source.Ref
 	Artifact    string
 	DeclareOnly bool
+	DryRun      bool
 }
-type SyncRequest struct{ Root string }
+type SyncRequest struct {
+	Root   string
+	DryRun bool
+}
 type Outcome string
 
 const (
 	OutcomeNoOp     Outcome = "no_op"
 	OutcomeApplied  Outcome = "applied"
+	OutcomePlanned  Outcome = "planned"
 	OutcomeConflict Outcome = "conflict"
 )
 
@@ -67,6 +72,7 @@ type Conflict struct {
 type Result struct {
 	Operation     string     `json:"operation"`
 	Outcome       Outcome    `json:"outcome"`
+	DryRun        bool       `json:"dry_run"`
 	ArtifactCount int        `json:"artifact_count"`
 	Changes       []Change   `json:"changes,omitempty"`
 	Conflicts     []Conflict `json:"conflicts,omitempty"`
@@ -101,7 +107,7 @@ type Service struct {
 func NewService(registry source.Registry, store repositorystate.Store) Service {
 	return Service{registry: registry, store: store}
 }
-func (service Service) Install(ctx context.Context, request Request) (Result, error) {
+func (service Service) Install(ctx context.Context, request Request) (result Result, err error) {
 	if request.Root == "" {
 		return Result{}, fmt.Errorf("repository root is required")
 	}
@@ -113,6 +119,21 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 	}
 	if request.Source.Version != "" {
 		return Result{}, fmt.Errorf("requested source versions are not supported")
+	}
+	operation, release, err := openOperationRoot(request.Root, request.DryRun)
+	if err != nil {
+		return Result{}, err
+	}
+	request.Root = operation.path
+	if release != nil {
+		defer func() {
+			if releaseErr := release(); releaseErr != nil {
+				err = errors.Join(err, fmt.Errorf("release operation lock: %w", releaseErr))
+			}
+		}()
+	}
+	if err := operation.validate(); err != nil {
+		return Result{}, err
 	}
 	identity, err := repositorystate.NormalizeSourceIdentity(request.Root, repositorystate.SourceIdentity{Type: request.Source.Type, Locator: request.Source.Locator})
 	if err != nil {
@@ -141,11 +162,11 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 	declaration := declarationFor(request, identity)
 	next, kind, err := manifest.AddDeclaration(request.Root, declaration)
 	if err != nil {
-		result := resultForConflicts("install", 0, []Conflict{{Kind: ConflictIntent, Source: identity, Artifact: request.Artifact}})
+		result := resultForConflicts("install", 0, []Conflict{{Kind: ConflictIntent, Source: identity, Artifact: request.Artifact}}, request.DryRun)
 		return result, UserActionError{Result: result}
 	}
 	if request.DeclareOnly && kind == repositorystate.ChangeKindUnchanged {
-		return Result{Operation: "install", Outcome: OutcomeNoOp}, nil
+		return Result{Operation: "install", Outcome: OutcomeNoOp, DryRun: request.DryRun}, nil
 	}
 	if !approved(manifest.TrustPolicy, identity) && outsideRoot(identity) {
 		return Result{}, TrustPolicyError{Denied: []repositorystate.SourceIdentity{identity}}
@@ -167,6 +188,12 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 		return Result{}, err
 	}
 	if request.DeclareOnly {
+		if request.DryRun {
+			return Result{Operation: "install", Outcome: OutcomePlanned, DryRun: true, ArtifactCount: len(selected), Changes: []Change{{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact}}}, nil
+		}
+		if err := operation.validate(); err != nil {
+			return Result{}, err
+		}
 		if err := service.store.WriteManifest(ctx, request.Root, next); err != nil {
 			return Result{}, err
 		}
@@ -213,15 +240,18 @@ func (service Service) Install(ctx context.Context, request Request) (Result, er
 	if kind == repositorystate.ChangeKindInserted {
 		prepared.Changes = append(prepared.Changes, Change{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact})
 	}
-	prepared.Files, prepared.Conflicts, err = preflightFiles(request.Root, desired, record)
+	if err := operation.validate(); err != nil {
+		return Result{}, err
+	}
+	prepared.Files, prepared.Conflicts, err = preflightFiles(request.Root, desired, record, operation.info)
 	if err != nil {
 		return Result{}, err
 	}
 	if len(prepared.Conflicts) > 0 {
-		result := resultForConflicts("install", len(desired), prepared.Conflicts)
+		result := resultForConflicts("install", len(desired), prepared.Conflicts, request.DryRun)
 		return result, UserActionError{Result: result}
 	}
-	return service.persistPrepared(ctx, request.Root, "install", prepared, &next)
+	return service.persistPrepared(ctx, request.Root, "install", prepared, &next, request.DryRun, operation)
 }
 func selectedArtifacts(resolved source.ResolvedSource, target repositorystate.DeclarationTarget) ([]source.ArtifactDescriptor, error) {
 	if target.Scope == repositorystate.DeclarationScopeSource {
@@ -273,6 +303,6 @@ func approved(policy repositorystate.TrustPolicy, source repositorystate.SourceI
 func outsideRoot(identity repositorystate.SourceIdentity) bool {
 	return filepath.IsAbs(filepath.FromSlash(identity.Locator))
 }
-func resultForConflicts(operation string, count int, conflicts []Conflict) Result {
-	return Result{Operation: operation, Outcome: OutcomeConflict, ArtifactCount: count, Conflicts: conflicts}
+func resultForConflicts(operation string, count int, conflicts []Conflict, dryRun bool) Result {
+	return Result{Operation: operation, Outcome: OutcomeConflict, DryRun: dryRun, ArtifactCount: count, Conflicts: conflicts}
 }

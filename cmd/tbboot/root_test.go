@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,133 @@ import (
 	installsvc "github.com/talby/talby-bootstrap/internal/install"
 	"github.com/talby/talby-bootstrap/internal/repositorystate"
 )
+
+func TestRepositoryRootAtCanonicalizesGitOutput(t *testing.T) {
+	root := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+
+	got, err := repositoryRootAt(context.Background(), alias, func(context.Context, string) ([]byte, []byte, error) {
+		return []byte(alias + "\n"), nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("repositoryRootAt() = %q, want %q", got, want)
+	}
+}
+
+func TestRepositoryRootAtRejectsMalformedGitOutput(t *testing.T) {
+	cwd := t.TempDir()
+	for name, stdout := range map[string][]byte{
+		"leading newline":        []byte("\n" + cwd + "\n"),
+		"interior newline":       []byte(cwd + "\nchild\n"),
+		"extra trailing newline": []byte(cwd + "\n\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := repositoryRootAt(context.Background(), cwd, func(context.Context, string) ([]byte, []byte, error) {
+				return stdout, nil, nil
+			})
+			if err == nil {
+				t.Fatal("repositoryRootAt() error = nil")
+			}
+		})
+	}
+}
+
+func TestRepositoryRootAtPreservesPathWhitespace(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "root ")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repositoryRootAt(context.Background(), root, func(context.Context, string) ([]byte, []byte, error) {
+		return []byte(root + "\n"), nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != root {
+		t.Fatalf("repositoryRootAt() = %q, want %q", got, root)
+	}
+}
+
+func TestRepositoryRootAtFallsBackOnlyForExplicitNonRepository(t *testing.T) {
+	cwd := t.TempDir()
+	got, err := repositoryRootAt(context.Background(), cwd, func(context.Context, string) ([]byte, []byte, error) {
+		return nil, []byte("fatal: not a git repository (or any of the parent directories): .git\n"), errors.New("exit status 128")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("fallback root = %q, want %q", got, want)
+	}
+}
+
+func TestRepositoryRootAtPropagatesNonRepositoryFailures(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout []byte
+		stderr []byte
+		err    error
+	}{
+		{name: "missing git", err: exec.ErrNotFound},
+		{name: "permission failure", stderr: []byte("fatal: permission denied\n"), err: errors.New("exit status 128")},
+		{name: "unrelated failure mentioning repository", stderr: []byte("fatal: not a git repository but permission denied\n"), err: errors.New("exit status 128")},
+		{name: "malformed output", stdout: []byte("one\ntwo\n")},
+		{name: "empty output", stdout: []byte{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := repositoryRootAt(context.Background(), t.TempDir(), func(context.Context, string) ([]byte, []byte, error) {
+				return tc.stdout, tc.stderr, tc.err
+			})
+			if err == nil {
+				t.Fatal("repositoryRootAt() error = nil")
+			}
+		})
+	}
+}
+
+func TestStableGitEnvironmentSetsOneLocale(t *testing.T) {
+	environment := stableGitEnvironment([]string{"PATH=/bin", "LC_ALL=fr_FR", "OTHER=value", "LC_ALL=de_DE"})
+	localeCount := 0
+	for _, value := range environment {
+		if strings.HasPrefix(value, "LC_ALL=") {
+			localeCount++
+			if value != "LC_ALL=C" {
+				t.Fatalf("locale entry = %q, want LC_ALL=C", value)
+			}
+		}
+	}
+	if localeCount != 1 {
+		t.Fatalf("LC_ALL entries = %d, want 1", localeCount)
+	}
+	for _, want := range []string{"PATH=/bin", "OTHER=value"} {
+		found := false
+		for _, value := range environment {
+			if value == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("environment missing %q: %v", want, environment)
+		}
+	}
+}
 
 func TestHelpIncludesOnlyImplementedCommandSurface(t *testing.T) {
 	var stdout bytes.Buffer
@@ -189,6 +317,157 @@ func TestChangeProvenanceInHumanAndJSONOutput(t *testing.T) {
 			t.Fatalf("JSON = %s, want %s", data, want)
 		}
 	}
+}
+
+func TestInstallDryRunReportsPlannedWithoutWriting(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	withDir(t, root, func() {
+		var stdout bytes.Buffer
+		if code := execute(context.Background(), []string{"install", "--dry-run", "file:" + sourceRoot}, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if !strings.Contains(stdout.String(), "install: planned") {
+			t.Fatalf("stdout = %q, want planned label", stdout.String())
+		}
+		for _, name := range []string{
+			repositorystate.ManifestFileName,
+			repositorystate.LockfileFileName,
+			repositorystate.MaterializationRecordFileName,
+			".tbboot-operation.lock",
+			"README.md",
+		} {
+			if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+				t.Fatalf("%s after dry run = %v, want absent", name, err)
+			}
+		}
+	})
+}
+
+func TestSyncDryRunReportsPlannedWithoutWriting(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	withDir(t, root, func() {
+		if code := execute(context.Background(), []string{"install", "--declare-only", "file:" + sourceRoot}, &bytes.Buffer{}, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+			t.Fatalf("declare-only exit code = %d, want 0", code)
+		}
+		manifestBefore, err := os.ReadFile(filepath.Join(root, repositorystate.ManifestFileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout bytes.Buffer
+		if code := execute(context.Background(), []string{"install", "--dry-run"}, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if !strings.Contains(stdout.String(), "sync: planned") {
+			t.Fatalf("stdout = %q, want planned label", stdout.String())
+		}
+		manifestAfter, err := os.ReadFile(filepath.Join(root, repositorystate.ManifestFileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(manifestAfter, manifestBefore) {
+			t.Fatal("dry run changed manifest")
+		}
+		for _, name := range []string{repositorystate.LockfileFileName, repositorystate.MaterializationRecordFileName, "README.md"} {
+			if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+				t.Fatalf("%s after dry run = %v, want absent", name, err)
+			}
+		}
+	})
+}
+
+func TestInstallDryRunJSONIncludesDryRunForExplicitAndSync(t *testing.T) {
+	for _, bare := range []bool{false, true} {
+		name := "explicit"
+		if bare {
+			name = "bare"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			sourceRoot := filepath.Join(root, "source")
+			writeInstallFixture(t, sourceRoot)
+			initGitRepo(t, root)
+
+			withDir(t, root, func() {
+				args := []string{"--output", "json", "install", "--dry-run"}
+				if !bare {
+					args = append(args, "file:"+sourceRoot)
+				} else if code := execute(context.Background(), []string{"install", "--declare-only", "file:" + sourceRoot}, &bytes.Buffer{}, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+					t.Fatalf("declare-only exit code = %d, want 0", code)
+				}
+				var stdout bytes.Buffer
+				if code := execute(context.Background(), args, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+					t.Fatalf("args %v exit code = %d, want 0", args, code)
+				}
+				var envelope app.Result
+				if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+					t.Fatal(err)
+				}
+				if envelope.Details["dry_run"] != true || envelope.Details["outcome"] != "planned" {
+					t.Fatalf("details = %#v, want dry_run=true and outcome=planned", envelope.Details)
+				}
+			})
+		})
+	}
+}
+
+func TestInstallDeclarationOnlyDryRunDoesNotCreateManifest(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	withDir(t, root, func() {
+		var stdout bytes.Buffer
+		if code := execute(context.Background(), []string{"install", "--dry-run", "--declare-only", "--artifact", "base-readme", "file:" + sourceRoot}, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if !strings.Contains(stdout.String(), "install: planned") {
+			t.Fatalf("stdout = %q, want planned label", stdout.String())
+		}
+		if _, err := os.Stat(filepath.Join(root, repositorystate.ManifestFileName)); !os.IsNotExist(err) {
+			t.Fatalf("manifest after dry run = %v, want absent", err)
+		}
+	})
+}
+
+func TestInstallDryRunNoOpJSONIncludesDryRun(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	withDir(t, root, func() {
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot}, &bytes.Buffer{}, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+			t.Fatalf("setup exit code = %d, want 0", code)
+		}
+		before := stateFiles(t, root)
+		var stdout bytes.Buffer
+		if code := execute(context.Background(), []string{"--output", "json", "install", "--dry-run"}, &stdout, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+			t.Fatalf("dry-run exit code = %d, want 0", code)
+		}
+		var envelope app.Result
+		if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Details["dry_run"] != true || envelope.Details["outcome"] != "no_op" {
+			t.Fatalf("details = %#v, want dry_run=true and outcome=no_op", envelope.Details)
+		}
+		if _, ok := envelope.Details["changes"]; ok {
+			t.Fatal("no-op JSON contains changes")
+		}
+		if got := stateFiles(t, root); !reflect.DeepEqual(got, before) {
+			t.Fatal("dry-run no-op changed repository state")
+		}
+	})
 }
 
 func TestSyncJSONIncludesAllTypedConflictsOnStderr(t *testing.T) {
