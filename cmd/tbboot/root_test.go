@@ -607,12 +607,15 @@ func TestExplicitSourceScopeInstallsAllArtifacts(t *testing.T) {
 		if err != nil || len(record.Artifacts) != 2 {
 			t.Fatalf("materialization record = %#v, %v", record, err)
 		}
-		var repeat bytes.Buffer
-		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot}, &repeat, &bytes.Buffer{}); code != 0 {
+		var repeat, repeatStderr bytes.Buffer
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot}, &repeat, &repeatStderr); code != 0 {
 			t.Fatalf("repeat exit code = %d, want 0", code)
 		}
 		if got := strings.TrimSpace(repeat.String()); got != "install: no changes (2 artifacts)" {
 			t.Fatalf("repeat output = %q", got)
+		}
+		if got := repeatStderr.String(); got != "" {
+			t.Fatalf("repeat stderr = %q, want empty", got)
 		}
 	})
 }
