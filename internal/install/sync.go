@@ -86,8 +86,13 @@ func (service Service) prepare(ctx context.Context, root string, manifest reposi
 		return strings.Compare(repositorystate.DeclarationKey(a), repositorystate.DeclarationKey(b))
 	})
 	denied := []repositorystate.SourceIdentity{}
+	seenDenied := map[repositorystate.SourceIdentity]struct{}{}
 	for _, d := range declarations {
 		if !approved(manifest.TrustPolicy, d.Source) && outsideRoot(d.Source) {
+			if _, seen := seenDenied[d.Source]; seen {
+				continue
+			}
+			seenDenied[d.Source] = struct{}{}
 			denied = append(denied, d.Source)
 		}
 	}

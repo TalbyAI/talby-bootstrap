@@ -327,6 +327,22 @@ func TestSyncAggregatesTrustDenialsBeforeResolution(t *testing.T) {
 		t.Fatalf("Sync() error = %T %v, calls=%d", err, err, impl.calls)
 	}
 }
+
+func TestSyncDeduplicatesTrustDenialsBySourceIdentity(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+	identity := repositorystate.SourceIdentity{Type: "file", Locator: external}
+	syncManifest(t, root,
+		repositorystate.Declaration{Source: identity, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeArtifact, Artifact: "a"}},
+		repositorystate.Declaration{Source: identity, Target: repositorystate.DeclarationTarget{Scope: repositorystate.DeclarationScopeArtifact, Artifact: "b"}},
+	)
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	_, err := service.Sync(context.Background(), SyncRequest{Root: root})
+	var denied TrustPolicyError
+	if !errors.As(err, &denied) || len(denied.Denied) != 1 || denied.Denied[0].Locator != filepath.ToSlash(external) || impl.calls != 0 {
+		t.Fatalf("Sync() error = %T %v, denied=%#v, calls=%d", err, err, denied.Denied, impl.calls)
+	}
+}
 func TestSyncRejectsDuplicateDesiredTargetWithinArtifact(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root, artifactDeclaration("a"))
