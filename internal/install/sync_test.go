@@ -17,7 +17,25 @@ import (
 
 type countingStore struct {
 	repositorystate.Store
-	lockWrites int
+	loadManifestCalls int
+	loadLockfileCalls int
+	loadRecordCalls   int
+	lockWrites        int
+}
+
+func (s *countingStore) LoadManifest(ctx context.Context, root string) (repositorystate.Manifest, error) {
+	s.loadManifestCalls++
+	return s.Store.LoadManifest(ctx, root)
+}
+
+func (s *countingStore) LoadLockfile(ctx context.Context, root string) (repositorystate.Lockfile, error) {
+	s.loadLockfileCalls++
+	return s.Store.LoadLockfile(ctx, root)
+}
+
+func (s *countingStore) LoadMaterializationRecord(ctx context.Context, root string) (repositorystate.MaterializationRecord, error) {
+	s.loadRecordCalls++
+	return s.Store.LoadMaterializationRecord(ctx, root)
 }
 
 func (s *countingStore) WriteLockfile(ctx context.Context, root string, lock repositorystate.Lockfile) error {
@@ -47,6 +65,129 @@ func TestSyncMissingManifestIsOperationalError(t *testing.T) {
 	service, _ := testService(testResolved(testArtifact("a", "a")))
 	if _, err := service.Sync(context.Background(), SyncRequest{Root: t.TempDir()}); err == nil {
 		t.Fatal("Sync() error = nil")
+	}
+}
+
+func TestSyncDryRunWritesNothingAndDoesNotCreateLock(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	beforeTarget, err := os.ReadFile(filepath.Join(root, "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeLock, err := os.ReadFile(filepath.Join(root, repositorystate.LockfileFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRecord, err := os.ReadFile(filepath.Join(root, repositorystate.MaterializationRecordFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	impl.resolved = testResolved(source.ArtifactDescriptor{Name: "a", Version: "1.0.0", Steps: []source.MaterializationStep{{Type: "file", TargetPath: "a", SourceBytes: []byte("new")}}})
+
+	result, err := service.Sync(context.Background(), SyncRequest{Root: root, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != OutcomePlanned || !result.DryRun || !hasChange(result, ChangeFileUpdated) {
+		t.Fatalf("result = %#v, want planned dry run", result)
+	}
+	for _, check := range []struct {
+		name string
+		want []byte
+	}{
+		{name: "a", want: beforeTarget},
+		{name: repositorystate.LockfileFileName, want: beforeLock},
+		{name: repositorystate.MaterializationRecordFileName, want: beforeRecord},
+	} {
+		got, err := os.ReadFile(filepath.Join(root, check.name))
+		if err != nil || !bytes.Equal(got, check.want) {
+			t.Fatalf("%s after dry run = %q, %v; want unchanged", check.name, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, operationLockName)); !os.IsNotExist(err) {
+		t.Fatalf("operation lock exists after dry run: %v", err)
+	}
+}
+
+func TestSyncDryRunConflictReportsDryRunAndWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	beforeManifest, err := os.ReadFile(filepath.Join(root, repositorystate.ManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeTarget := []byte("other")
+	if err := os.WriteFile(filepath.Join(root, "a"), beforeTarget, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+
+	_, err = service.Sync(context.Background(), SyncRequest{Root: root, DryRun: true})
+	var conflict UserActionError
+	if !errors.As(err, &conflict) || !conflict.Result.DryRun {
+		t.Fatalf("Sync() error = %T %v, want dry-run conflict", err, err)
+	}
+	afterManifest, err := os.ReadFile(filepath.Join(root, repositorystate.ManifestFileName))
+	if err != nil || !bytes.Equal(afterManifest, beforeManifest) {
+		t.Fatalf("manifest after dry-run conflict = %q, %v; want unchanged", afterManifest, err)
+	}
+	afterTarget, err := os.ReadFile(filepath.Join(root, "a"))
+	if err != nil || !bytes.Equal(afterTarget, beforeTarget) {
+		t.Fatalf("target after dry-run conflict = %q, %v; want unchanged", afterTarget, err)
+	}
+	for _, name := range []string{repositorystate.LockfileFileName, repositorystate.MaterializationRecordFileName} {
+		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s after dry-run conflict = %v, want absent", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, operationLockName)); !os.IsNotExist(err) {
+		t.Fatalf("operation lock exists after dry-run conflict: %v", err)
+	}
+}
+
+func TestSyncJoinsLockReleaseError(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	impl := &testSource{resolve: func(source.ResolveRequest) (source.ResolvedSource, error) {
+		if err := os.RemoveAll(filepath.Join(root, operationLockName)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(root, operationLockName), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, operationLockName, "block-removal"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return source.ResolvedSource{}, errors.New("resolve failed")
+	}}
+	service := NewService(source.NewStaticRegistry(map[string]source.Source{"file": impl}), repositorystate.NewStore())
+
+	_, err := service.Sync(context.Background(), SyncRequest{Root: root})
+	if err == nil || !strings.Contains(err.Error(), "resolve failed") || !strings.Contains(err.Error(), "release operation lock") {
+		t.Fatalf("Sync() error = %v, want operation and release errors", err)
+	}
+}
+
+func TestSyncRejectsLockedOperationBeforeDependencies(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, operationLockName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	service, impl := testService(testResolved(testArtifact("a", "a")))
+	store := &countingStore{Store: repositorystate.NewStore()}
+	service.store = store
+
+	_, err := service.Sync(context.Background(), SyncRequest{Root: root})
+	if err == nil || !strings.Contains(err.Error(), "already locked") {
+		t.Fatalf("Sync() error = %v, want operation lock conflict", err)
+	}
+	if impl.calls != 0 || store.loadManifestCalls != 0 || store.loadLockfileCalls != 0 || store.loadRecordCalls != 0 {
+		t.Fatalf("dependencies reached: resolve=%d manifest=%d lock=%d record=%d", impl.calls, store.loadManifestCalls, store.loadLockfileCalls, store.loadRecordCalls)
 	}
 }
 
@@ -263,6 +404,41 @@ func TestPreflightRejectsTargetOverlappingAnotherSourceInput(t *testing.T) {
 		t.Fatalf("preflightFiles() error = %v, want cross-Source input overlap", err)
 	}
 }
+
+func TestPreflightRejectsOperationLockDescendant(t *testing.T) {
+	desired := []desiredArtifact{{
+		Key:        repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Name: "a"},
+		Descriptor: testArtifact("a", filepath.Join(operationLockName, "nested")),
+	}}
+
+	if _, _, err := preflightFiles(t.TempDir(), desired, repositorystate.MaterializationRecord{}); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("preflightFiles() error = %v, want operation-lock reservation", err)
+	}
+}
+
+func TestPreflightIgnoresMissingUnrelatedManagedFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "target"), []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	record := repositorystate.MaterializationRecord{Artifacts: []repositorystate.ManagedArtifactRecord{{
+		Source:          repositorystate.SourceIdentity{Type: "file", Locator: "other"},
+		ResolvedVersion: testSnapshotVersion,
+		Artifact:        "other",
+		ArtifactVersion: "1.0.0",
+		Files:           []repositorystate.ManagedFileRecord{{Path: "missing", Digest: "unused"}},
+	}}}
+	desired := []desiredArtifact{{
+		Key:        repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "source"}, Name: "a"},
+		Descriptor: testArtifact("a", "target"),
+	}}
+	desired[0].Descriptor.Steps[0].SourceBytes = []byte("same")
+
+	files, conflicts, err := preflightFiles(root, desired, record)
+	if err != nil || len(conflicts) != 0 || len(files) != 1 {
+		t.Fatalf("preflightFiles() = files %d, conflicts %#v, error %v; want adoption", len(files), conflicts, err)
+	}
+}
 func TestSyncRejectsNonRegularUnownedTarget(t *testing.T) {
 	root := t.TempDir()
 	syncManifest(t, root, artifactDeclaration("a"))
@@ -328,7 +504,7 @@ func TestPersistPreparedClassifiesWriteRaceAsDrift(t *testing.T) {
 			Change:   ChangeFileCreated,
 		}},
 	}
-	_, err = (Service{}).persistPrepared(context.Background(), root, "sync", prepared, nil)
+	_, err = (Service{}).persistPrepared(context.Background(), root, "sync", prepared, nil, false)
 	var conflict UserActionError
 	if !errors.As(err, &conflict) || len(conflict.Result.Conflicts) != 1 || conflict.Result.Conflicts[0].Kind != ConflictDrift || conflict.Result.Conflicts[0].Source != artifact.Key.Source || conflict.Result.Conflicts[0].Artifact != artifact.Key.Name || conflict.Result.Conflicts[0].Paths[0] != "target" {
 		t.Fatalf("persistPrepared() error = %T %v, want target drift", err, err)
@@ -370,7 +546,7 @@ func TestPersistPreparedClassifiesAdoptionParentRaceAsDrift(t *testing.T) {
 		}},
 	}
 
-	_, err = (Service{}).persistPrepared(context.Background(), root, "sync", prepared, nil)
+	_, err = (Service{}).persistPrepared(context.Background(), root, "sync", prepared, nil, false)
 	var conflict UserActionError
 	if !errors.As(err, &conflict) || len(conflict.Result.Conflicts) != 1 || conflict.Result.Conflicts[0].Kind != ConflictDrift {
 		t.Fatalf("persistPrepared() error = %T %v, want adoption drift", err, err)

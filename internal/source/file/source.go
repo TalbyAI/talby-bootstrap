@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"hash"
 	"os"
@@ -127,31 +126,63 @@ func canonicalExistingDir(path string) (string, error) {
 	return filepath.EvalSymlinks(abs)
 }
 
-func canonicalContained(root, path, message string) (string, error) {
-	canonical, err := filepath.EvalSymlinks(path)
+func realParentDirs(root *os.Root, relative string) error {
+	for parent := filepath.Dir(relative); parent != "."; parent = filepath.Dir(parent) {
+		info, err := root.Lstat(parent)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeIrregular != 0 || isWindowsReparsePoint(info) || !info.IsDir() {
+			return fmt.Errorf("source path must be a real directory")
+		}
+	}
+	return nil
+}
+
+func realDir(root *os.Root, relative string) error {
+	if err := realParentDirs(root, relative); err != nil {
+		return err
+	}
+	info, err := root.Lstat(relative)
 	if err != nil {
-		return "", err
+		return err
 	}
-	rel, err := filepath.Rel(root, canonical)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", errors.New(message)
+	if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeIrregular != 0 || isWindowsReparsePoint(info) || !info.IsDir() {
+		return fmt.Errorf("source path must be a real directory")
 	}
-	return canonical, nil
+	return nil
+}
+
+func readRealFile(root *os.Root, relative string) ([]byte, error) {
+	if err := realParentDirs(root, relative); err != nil {
+		return nil, err
+	}
+	info, err := root.Lstat(relative)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeIrregular != 0 || isWindowsReparsePoint(info) || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("source input must be a regular file")
+	}
+	return root.ReadFile(relative)
 }
 
 func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.ResolvedSource, error) {
 	if req.Ref.Version != "" {
 		return source.ResolvedSource{}, fmt.Errorf("file source does not support requested versions")
 	}
-	root, err := canonicalExistingDir(req.Ref.Locator)
+	canonicalRoot, err := canonicalExistingDir(req.Ref.Locator)
 	if err != nil {
 		return source.ResolvedSource{}, err
 	}
-	sourcePath, err := canonicalContained(root, filepath.Join(root, repositorystate.SourceDescriptorFileName), "source descriptor must stay within source root")
+	root, err := os.OpenRoot(canonicalRoot)
 	if err != nil {
 		return source.ResolvedSource{}, err
 	}
-	sourceBytes, err := os.ReadFile(sourcePath)
+	defer func() { _ = root.Close() }()
+
+	sourcePath := filepath.Join(canonicalRoot, repositorystate.SourceDescriptorFileName)
+	sourceBytes, err := readRealFile(root, repositorystate.SourceDescriptorFileName)
 	if err != nil {
 		return source.ResolvedSource{}, fmt.Errorf("read %s: %w", sourcePath, err)
 	}
@@ -163,26 +194,21 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 		return source.ResolvedSource{}, fmt.Errorf("parse %s: %w", sourcePath, err)
 	}
 
-	resolved := source.ResolvedSource{Identity: source.Identity{Type: "file", Name: filepath.Base(root)}, Artifacts: make([]source.ArtifactDescriptor, 0, len(descriptor.Artifacts)), InputPaths: []string{sourcePath}}
+	resolved := source.ResolvedSource{Identity: source.Identity{Type: "file", Name: filepath.Base(canonicalRoot)}, Artifacts: make([]source.ArtifactDescriptor, 0, len(descriptor.Artifacts)), InputPaths: []string{sourcePath}}
 	snapshot := sha256.New()
 	writeSnapshotField(snapshot, sourceBytes)
 	for _, ref := range descriptor.Artifacts {
-		dir, err := canonicalContained(root, filepath.Join(root, filepath.FromSlash(ref.Path)), "artifact path must stay within source root")
+		artifactDir := filepath.FromSlash(ref.Path)
+		if err := realDir(root, artifactDir); err != nil {
+			return source.ResolvedSource{}, err
+		}
+		artifactRoot, err := root.OpenRoot(artifactDir)
 		if err != nil {
 			return source.ResolvedSource{}, err
 		}
-		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(ref.Path)))
-		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			if err != nil {
-				return source.ResolvedSource{}, err
-			}
-			return source.ResolvedSource{}, fmt.Errorf("artifact path is not a regular directory")
-		}
-		artifactPath, err := canonicalContained(dir, filepath.Join(dir, repositorystate.ArtifactDescriptorFileName), "artifact descriptor must stay within artifact directory")
-		if err != nil {
-			return source.ResolvedSource{}, err
-		}
-		data, err := os.ReadFile(artifactPath)
+		defer func() { _ = artifactRoot.Close() }()
+		artifactPath := filepath.Join(canonicalRoot, artifactDir, repositorystate.ArtifactDescriptorFileName)
+		data, err := readRealFile(artifactRoot, repositorystate.ArtifactDescriptorFileName)
 		if err != nil {
 			return source.ResolvedSource{}, fmt.Errorf("read %s: %w", artifactPath, err)
 		}
@@ -199,18 +225,9 @@ func (Source) Resolve(_ context.Context, req source.ResolveRequest) (source.Reso
 		writeSnapshotField(snapshot, data)
 		steps := make([]source.MaterializationStep, 0, len(artifact.Steps))
 		for _, step := range artifact.Steps {
-			input, err := canonicalContained(dir, filepath.Join(dir, filepath.FromSlash(step.Source)), "file step source must stay within artifact directory")
-			if err != nil {
-				return source.ResolvedSource{}, err
-			}
-			info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(step.Source)))
-			if err != nil {
-				return source.ResolvedSource{}, err
-			}
-			if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-				return source.ResolvedSource{}, fmt.Errorf("file step source must be a regular file")
-			}
-			bytes, err := os.ReadFile(input)
+			inputRelative := filepath.FromSlash(step.Source)
+			input := filepath.Join(canonicalRoot, artifactDir, inputRelative)
+			bytes, err := readRealFile(artifactRoot, inputRelative)
 			if err != nil {
 				return source.ResolvedSource{}, fmt.Errorf("read %s: %w", input, err)
 			}

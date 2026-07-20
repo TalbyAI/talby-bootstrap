@@ -30,6 +30,7 @@ type Observation struct {
 	Mode         os.FileMode
 	Digest       string
 	rootInfo     os.FileInfo
+	targetInfo   os.FileInfo
 }
 type ChangedSincePreflightError struct{ Path string }
 type targetParentError struct{}
@@ -50,25 +51,23 @@ func Observe(root, target string) (Observation, error) {
 	if err != nil {
 		return Observation{}, err
 	}
-	rootInfo, err := os.Stat(canonicalRoot)
+	opened, err := os.OpenRoot(canonicalRoot)
 	if err != nil {
 		return Observation{}, err
 	}
-	absolute := filepath.Join(canonicalRoot, clean)
-	for dir := filepath.Dir(absolute); dir != canonicalRoot; dir = filepath.Dir(dir) {
-		info, err := os.Lstat(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return Observation{}, err
-		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return Observation{}, targetParentError{}
-		}
+	defer func() { _ = opened.Close() }()
+	return observeRooted(opened, canonicalRoot, clean)
+}
+func observeRooted(root *os.Root, rootPath, target string) (Observation, error) {
+	if err := inspectParents(root, target); err != nil {
+		return Observation{}, err
 	}
-	ob := Observation{Root: canonicalRoot, Path: filepath.ToSlash(clean), AbsolutePath: absolute, Kind: EntryAbsent, rootInfo: rootInfo}
-	info, err := os.Lstat(absolute)
+	rootInfo, err := root.Stat(".")
+	if err != nil {
+		return Observation{}, err
+	}
+	ob := Observation{Root: rootPath, Path: filepath.ToSlash(target), AbsolutePath: filepath.Join(rootPath, target), Kind: EntryAbsent, rootInfo: rootInfo}
+	info, err := root.Lstat(target)
 	if os.IsNotExist(err) {
 		return ob, nil
 	}
@@ -76,21 +75,46 @@ func Observe(root, target string) (Observation, error) {
 		return Observation{}, err
 	}
 	ob.Mode = info.Mode()
+	ob.targetInfo = info
 	if info.Mode()&os.ModeSymlink != 0 {
 		ob.Kind = EntrySymlink
 		return ob, nil
 	}
-	if !info.Mode().IsRegular() {
+	if isWindowsReparsePoint(info) || !info.Mode().IsRegular() {
 		ob.Kind = EntryOther
 		return ob, nil
 	}
-	data, err := os.ReadFile(absolute)
+	data, err := root.ReadFile(target)
 	if err != nil {
 		return Observation{}, err
 	}
 	ob.Kind = EntryRegular
 	ob.Digest = Digest(data)
 	return ob, nil
+}
+func inspectParents(root *os.Root, target string) error {
+	parent := filepath.Dir(target)
+	if parent == "." {
+		return nil
+	}
+	path := ""
+	for _, component := range strings.Split(parent, string(filepath.Separator)) {
+		path = filepath.Join(path, component)
+		info, err := root.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !isRealDirectory(info) {
+			return targetParentError{}
+		}
+	}
+	return nil
+}
+func isRealDirectory(info os.FileInfo) bool {
+	return info.IsDir() && info.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0 && !isWindowsReparsePoint(info)
 }
 func PathKey(path string) string {
 	path = filepath.Clean(path)
@@ -100,11 +124,23 @@ func PathKey(path string) string {
 	return path
 }
 func SameObservation(a, b Observation) bool {
-	sameRoot := a.rootInfo == nil && b.rootInfo == nil
-	if a.rootInfo != nil && b.rootInfo != nil {
-		sameRoot = os.SameFile(a.rootInfo, b.rootInfo)
+	return sameFileIdentity(a.rootInfo, b.rootInfo) && sameFileIdentity(a.targetInfo, b.targetInfo) && a.Root == b.Root && a.Path == b.Path && a.AbsolutePath == b.AbsolutePath && a.Kind == b.Kind && a.Mode == b.Mode && a.Digest == b.Digest
+}
+func SameEntryIdentity(a, b Observation) bool {
+	return a.targetInfo != nil && b.targetInfo != nil && os.SameFile(a.targetInfo, b.targetInfo)
+}
+func SamePathIdentity(observed Observation, path string) (bool, error) {
+	if observed.targetInfo == nil {
+		return false, nil
 	}
-	return sameRoot && a.Root == b.Root && a.Path == b.Path && a.AbsolutePath == b.AbsolutePath && a.Kind == b.Kind && a.Mode.Perm() == b.Mode.Perm() && a.Digest == b.Digest
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(observed.targetInfo, info), nil
+}
+func sameFileIdentity(a, b os.FileInfo) bool {
+	return a == nil && b == nil || a != nil && b != nil && os.SameFile(a, b)
 }
 func Revalidate(observed Observation) error {
 	current, err := Observe(observed.Root, observed.Path)
@@ -176,54 +212,19 @@ func writeRooted(root *os.Root, observed Observation, content []byte) error {
 	if err != nil {
 		return err
 	}
-	if currentParent.Mode()&os.ModeSymlink != 0 || !currentParent.IsDir() || !os.SameFile(currentParent, openedParent) {
+	if !isRealDirectory(currentParent) || !os.SameFile(currentParent, openedParent) {
 		return ChangedSincePreflightError{Path: observed.Path}
 	}
 	return dir.Rename(tmp, base)
 }
 func revalidateRoot(root *os.Root, observed Observation) error {
-	current := observed
-	current.Kind, current.Mode, current.Digest = EntryAbsent, 0, ""
-	rootInfo, err := root.Stat(".")
+	current, err := observeRooted(root, observed.Root, filepath.FromSlash(observed.Path))
 	if err != nil {
-		return err
-	}
-	current.rootInfo = rootInfo
-	path := filepath.FromSlash(observed.Path)
-	for parent := filepath.Dir(path); parent != "."; parent = filepath.Dir(parent) {
-		info, err := root.Lstat(parent)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		var parent targetParentError
+		if errors.As(err, &parent) {
 			return ChangedSincePreflightError{Path: observed.Path}
 		}
-	}
-	info, err := root.Lstat(path)
-	if os.IsNotExist(err) {
-		if SameObservation(observed, current) {
-			return nil
-		}
-		return ChangedSincePreflightError{Path: observed.Path}
-	}
-	if err != nil {
 		return err
-	}
-	current.Mode = info.Mode()
-	if info.Mode()&os.ModeSymlink != 0 {
-		current.Kind = EntrySymlink
-	} else if !info.Mode().IsRegular() {
-		current.Kind = EntryOther
-	} else {
-		data, err := root.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		current.Kind = EntryRegular
-		current.Digest = Digest(data)
 	}
 	if !SameObservation(observed, current) {
 		return ChangedSincePreflightError{Path: observed.Path}
