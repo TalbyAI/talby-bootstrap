@@ -594,6 +594,29 @@ func TestExplicitSourceScopeInstallsAllArtifacts(t *testing.T) {
 				t.Fatalf("%s was not installed: %v", path, err)
 			}
 		}
+		store := repositorystate.NewStore()
+		manifest, err := store.LoadManifest(context.Background(), root)
+		if err != nil || len(manifest.Declarations) != 1 || manifest.Declarations[0].Target.Scope != repositorystate.DeclarationScopeSource {
+			t.Fatalf("manifest = %#v, %v", manifest, err)
+		}
+		lock, err := store.LoadLockfile(context.Background(), root)
+		if err != nil || len(lock.Resolutions) != 1 || len(lock.Resolutions[0].Artifacts) != 2 {
+			t.Fatalf("lockfile = %#v, %v", lock, err)
+		}
+		record, err := store.LoadMaterializationRecord(context.Background(), root)
+		if err != nil || len(record.Artifacts) != 2 {
+			t.Fatalf("materialization record = %#v, %v", record, err)
+		}
+		var repeat, repeatStderr bytes.Buffer
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot}, &repeat, &repeatStderr); code != 0 {
+			t.Fatalf("repeat exit code = %d, want 0", code)
+		}
+		if got := strings.TrimSpace(repeat.String()); got != "install: no changes (2 artifacts)" {
+			t.Fatalf("repeat output = %q", got)
+		}
+		if got := repeatStderr.String(); got != "" {
+			t.Fatalf("repeat stderr = %q, want empty", got)
+		}
 	})
 }
 
