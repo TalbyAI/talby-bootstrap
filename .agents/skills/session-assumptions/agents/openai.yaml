@@ -1,0 +1,4 @@
+interface:
+  display_name: "Session Assumptions"
+  short_description: "List agent-made session assumptions"
+  default_prompt: "Use $session-assumptions to list discussion-worthy assumptions and decisions introduced during this session."
