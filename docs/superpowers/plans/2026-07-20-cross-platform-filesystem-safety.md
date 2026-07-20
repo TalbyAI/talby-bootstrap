@@ -12,6 +12,8 @@
 
 - Every mutating install operation uses one canonical Operation Root.
 - An exclusive .tbboot-operation.lock directory in the Operation Root is the cross-platform lock.
+- `internal/install` stores the canonical root path and the root `os.FileInfo` identity captured after lock acquisition in a private `operationRoot` value.
+- The locked root identity is checked before preflight, against every target observation, and immediately before repository-state persistence.
 - Creating the lock with os.Mkdir is atomic; an existing path fails the operation.
 - A stale lock is not taken over automatically.
 - Releasing the lock returns an error; a failed release is reported instead of being ignored.
@@ -28,7 +30,7 @@
 - Target collisions are checked using canonical path keys and filesystem identity, including platform case behavior and hard-link aliases where the operating system exposes identity.
 - Existing target modes are preserved; new files use 0644.
 - Replacement uses a unique temporary file in the target's directory followed by confined same-directory rename.
-- Root, parent, target, and opened-directory identity are rechecked immediately before replacement.
+- Root, every parent that existed during observation, target, and opened-directory identity are rechecked immediately before replacement; missing parents remain creatable.
 - A race becomes the existing typed drift/conflict path.
 - Add DryRun to install and sync requests.
 - Add OutcomePlanned and DryRun to operation results.
@@ -44,14 +46,14 @@ The seven-task split is execution order and file ownership only; it does not add
 
 - Modify cmd/tbboot/install.go: canonical Operation Root discovery, --dry-run propagation, JSON dry_run, and human planned-output label.
 - Modify cmd/tbboot/root_test.go: root-discovery, Dry Run, human output, and JSON output tests.
-- Create internal/install/operation_lock.go: exclusive root lock and release closure.
-- Create internal/install/operation_lock_test.go: lock acquisition, rejection, and cleanup tests.
+- Create internal/install/operation_lock.go: canonical operation root, root identity, exclusive lock, and release closure.
+- Create internal/install/operation_lock_test.go: lock acquisition, root replacement rejection, and cleanup tests.
 - Modify internal/install/service.go: request/result contracts, lock lifecycle, Dry Run declaration handling, and conflict propagation.
 - Modify internal/install/sync.go: lock lifecycle, Dry Run persistence branch, and filesystem-identity preflight checks.
 - Modify internal/install/service_test.go and internal/install/sync_test.go: service-level lock, Dry Run, topology, collision, and no-write tests.
 - Modify internal/install/service_windows_test.go: Windows case-normalization and reparse-point coverage.
 - Modify internal/materialize/service.go: confined target observation, entry identity capture, parent/target/root revalidation, and atomic replacement checks.
-- Modify internal/materialize/service_test.go: target topology, hard-link identity, mode, atomic replacement, and race tests.
+- Modify internal/materialize/service_test.go: target topology, parent replacement, hard-link identity, mode, atomic replacement, and race tests.
 - Create internal/materialize/service_windows_test.go: Windows reparse-point and case behavior tests.
 - Modify internal/source/file/source.go: confined source-root reads and rejection of unsafe consumed inputs.
 - Modify internal/source/file/source_test.go: source topology, special-file, and escape tests.
@@ -247,8 +249,8 @@ git commit -m "fix: canonicalize operation root discovery"
 
 **Interfaces:**
 
-- Consumes: canonical root strings from Task 1's CLI boundary and existing Service.Install/Service.Sync entrypoints.
-- Produces: acquireOperationLock(string) (func() error, error), Request.DryRun, SyncRequest.DryRun, OutcomePlanned, Result.DryRun, and conflict results carrying Dry Run state.
+- Consumes: root strings from the CLI or direct service callers and existing Service.Install/Service.Sync entrypoints.
+- Produces: a private `operationRoot` with canonical path and identity, acquireOperationLock(string) (func() error, error), Request.DryRun, SyncRequest.DryRun, OutcomePlanned, Result.DryRun, and conflict results carrying Dry Run state.
 
 - [ ] **Step 1: Add failing lock and contract tests**
 
@@ -305,7 +307,12 @@ Expected: FAIL because the lock helper and new request/result fields do not exis
 
 - [ ] **Step 3: Implement the minimal lock and public contracts**
 
-Create internal/install/operation_lock.go:
+Create internal/install/operation_lock.go. Keep `acquireOperationLock` focused on
+the directory lock, and add a private operation-root helper that canonicalizes
+the path, acquires the lock on that canonical path, captures `os.Stat` identity
+after acquisition, and validates that identity later. Install and Sync keep
+their existing explicit lock-release defers; do not add a `withOperationLock`
+wrapper.
 
 ~~~go
 package install
@@ -331,7 +338,10 @@ func acquireOperationLock(root string) (func() error, error) {
 }
 ~~~
 
-Update internal/install/service.go:
+Update internal/install/service.go and sync.go to use the canonical path from
+the operation-root helper for all reads, source resolution, preflight, and
+state writes. For Dry Run, canonicalize and capture the root without creating
+the lock. A root mismatch returns `ChangedSincePreflightError` with path `.`.
 
 ~~~go
 type Request struct {
@@ -355,12 +365,12 @@ const (
 )
 
 type Result struct {
-    Operation     string     @@json:"operation"@@
-    Outcome       Outcome    @@json:"outcome"@@
-    DryRun        bool       @@json:"dry_run"@@
-    ArtifactCount int        @@json:"artifact_count"@@
-    Changes       []Change   @@json:"changes,omitempty"@@
-    Conflicts     []Conflict @@json:"conflicts,omitempty"@@
+    Operation     string     `json:"operation"`
+    Outcome       Outcome    `json:"outcome"`
+    DryRun        bool       `json:"dry_run"`
+    ArtifactCount int        `json:"artifact_count"`
+    Changes       []Change   `json:"changes,omitempty"`
+    Conflicts     []Conflict `json:"conflicts,omitempty"`
 }
 ~~~
 
@@ -398,7 +408,7 @@ git commit -m "fix: serialize operations per root"
 **Interfaces:**
 
 - Consumes: root-relative target paths and existing os.Root replacement flow.
-- Produces: Observation values carrying target identity, SameEntryIdentity(Observation, Observation) bool, SamePathIdentity(Observation, string) (bool, error), and typed ChangedSincePreflightError behavior for root/parent/target races.
+- Produces: Observation values carrying target and existing-parent identities, a minimal root-identity comparison for install preflight, SameEntryIdentity(Observation, Observation) bool, SamePathIdentity(Observation, string) (bool, error), and typed ChangedSincePreflightError behavior for root/parent/target races.
 
 - [ ] **Step 1: Add failing topology and identity tests**
 
@@ -428,14 +438,30 @@ func TestObserveCapturesHardLinkIdentity(t *testing.T) {
     }
 }
 
-func TestObserveRejectsSpecialTargetParent(t *testing.T) {
+func TestWriteRejectsReplacedTargetParent(t *testing.T) {
     root := t.TempDir()
     parent := filepath.Join(root, "parent")
-    if err := os.WriteFile(parent, []byte("not a directory"), 0o644); err != nil {
+    if err := os.Mkdir(parent, 0o755); err != nil {
         t.Fatal(err)
     }
-    if _, err := Observe(root, "parent/file"); err == nil || err.Error() != "target parent must be a real directory" {
-        t.Fatalf("Observe() error = %v, want real-directory rejection", err)
+    observed, err := Observe(root, "parent/file")
+    if err != nil {
+        t.Fatal(err)
+    }
+    moved := parent + "-moved"
+    if err := os.Rename(parent, moved); err != nil {
+        t.Fatal(err)
+    }
+    t.Cleanup(func() { _ = os.RemoveAll(moved) })
+    if err := os.Mkdir(parent, 0o755); err != nil {
+        t.Fatal(err)
+    }
+    var changed ChangedSincePreflightError
+    if err := Write(observed, []byte("content")); !errors.As(err, &changed) {
+        t.Fatalf("Write() error = %T %v, want parent identity drift", err, err)
+    }
+    if _, err := os.Stat(filepath.Join(parent, "file")); !os.IsNotExist(err) {
+        t.Fatalf("replacement parent target error = %v, want not exist", err)
     }
 }
 ~~~
@@ -450,7 +476,7 @@ Run:
 go test ./internal/materialize -run 'TestObserveCapturesHardLinkIdentity|TestObserveRejectsSpecialTargetParent' -count=1
 ~~~
 
-Expected: FAIL because observations do not retain target identity and no public identity comparison exists.
+Expected: FAIL because observations do not retain target/parent identity and no root-identity comparison exists.
 
 - [ ] **Step 3: Implement confined observation and identity comparison**
 
@@ -466,6 +492,16 @@ type Observation struct {
     Digest       string
     rootInfo     os.FileInfo
     targetInfo   os.FileInfo
+    parents      []parentObservation
+}
+
+type parentObservation struct {
+    Path string
+    Info os.FileInfo
+}
+
+func SameRootIdentity(observation Observation, rootInfo os.FileInfo) bool {
+    return sameFileIdentity(observation.rootInfo, rootInfo)
 }
 
 func SameEntryIdentity(a, b Observation) bool {
@@ -484,11 +520,11 @@ func SamePathIdentity(observed Observation, path string) (bool, error) {
 }
 ~~~
 
-In Observe, keep portable relative-path rejection, canonicalize the root once, open it with os.OpenRoot, inspect existing parent components with root.Lstat, and reject any parent that is not a real directory or has os.ModeSymlink/os.ModeIrregular or the Windows `FILE_ATTRIBUTE_REPARSE_POINT` bit. Capture targetInfo from root.Lstat; classify a final symlink as EntrySymlink, classify any other reparse point or special entry as EntryOther, and read only regular bytes through root.ReadFile. Missing parent components remain creatable by the existing writer.
+In Observe, keep portable relative-path rejection, canonicalize the root once, open it with os.OpenRoot, inspect existing parent components with root.Lstat, and reject any parent that is not a real directory or has os.ModeSymlink/os.ModeIrregular or the Windows `FILE_ATTRIBUTE_REPARSE_POINT` bit. Capture each existing parent identity and targetInfo from root.Lstat; classify a final symlink as EntrySymlink, classify any other reparse point or special entry as EntryOther, and read only regular bytes through root.ReadFile. Missing parent components remain creatable by the existing writer. SameObservation compares every parent recorded during the original observation with the current entry at that path; newly created entries for previously missing parents remain allowed.
 
 Implement `isWindowsReparsePoint(os.FileInfo) bool` in `reparse_windows.go` and `reparse_other.go`. On Windows, inspect `info.Sys().(*syscall.Win32FileAttributeData).FileAttributes` for `syscall.FILE_ATTRIBUTE_REPARSE_POINT`; do not rely on `os.ModeIrregular`, because Go intentionally treats `IO_REPARSE_TAG_DEDUP` as regular. On other platforms, the predicate returns false.
 
-In revalidateRoot, compare the opened root's root.Stat(".") with the observed root identity, repeat parent topology checks using the platform predicate, capture current target identity, and compare target kind, mode, digest, path, and root identity. In writeRooted, keep root.MkdirAll, open the target parent through the same os.Root, create a unique 0600 temporary file in that directory, write and chmod the complete payload, revalidate root/target, compare root.Lstat(parent) with dir.Stat(".") using os.SameFile, then call dir.Rename(tmp, base). Return ChangedSincePreflightError for topology or identity drift. Preserve final symlink replacement at this low-level atomic seam; install preflight rejects unsafe final entries before it calls Write. `Write` is not the install policy gate and has no production caller outside `internal/install`.
+In revalidateRoot, compare the opened root's root.Stat(".") with the observed root identity, repeat parent topology checks using the platform predicate and recorded parent identities, capture current target identity, and compare target kind, mode, digest, path, and root identity. In writeRooted, keep root.MkdirAll, open the target parent through the same os.Root, create a unique 0600 temporary file in that directory, write and chmod the complete payload, revalidate root/target/recorded parents, compare root.Lstat(parent) with dir.Stat(".") using os.SameFile, then call dir.Rename(tmp, base). Return ChangedSincePreflightError for topology or identity drift. Preserve final symlink replacement at this low-level atomic seam; install preflight rejects unsafe final entries before it calls Write. `Write` is not the install policy gate and has no production caller outside `internal/install`.
 
 Add this comment at the caller in Task 5 if preflight remains pairwise:
 
@@ -578,15 +614,19 @@ Expected: FAIL because current EvalSymlinks-based reads accept links that resolv
 
 - [ ] **Step 3: Implement rooted real-path reads**
 
-Replace canonicalContained-then-os.ReadFile calls with small rooted helpers. Keep canonicalExistingDir only for obtaining the canonical source root. Implement the package-local `isWindowsReparsePoint(os.FileInfo) bool` in `reparse_windows.go` and `reparse_other.go`, matching materialize so source reads reject the same Windows entries:
+Replace canonicalContained-then-os.ReadFile calls with small rooted helpers. Keep canonicalExistingDir only for obtaining the canonical source root. Implement the package-local `isWindowsReparsePoint(os.FileInfo) bool` in `reparse_windows.go` and `reparse_other.go`, matching materialize so source reads reject the same Windows entries. Centralize only the shared unsafe-entry predicate in `source.go`; do not create a shared package for the Windows helper:
 
 ~~~go
+func isUnsafeSourceEntry(info os.FileInfo) bool {
+    return info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || isWindowsReparsePoint(info)
+}
+
 func realDir(root *os.Root, relative string) error {
     info, err := root.Lstat(filepath.FromSlash(relative))
     if err != nil {
         return err
     }
-    if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeIrregular != 0 || isWindowsReparsePoint(info) || !info.IsDir() {
+    if isUnsafeSourceEntry(info) || !info.IsDir() {
         return fmt.Errorf("source path must be a real directory")
     }
     return nil
@@ -598,7 +638,7 @@ func readRealFile(root *os.Root, relative string) ([]byte, error) {
     if err != nil {
         return nil, err
     }
-    if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeIrregular != 0 || isWindowsReparsePoint(info) || !info.Mode().IsRegular() {
+    if isUnsafeSourceEntry(info) || !info.Mode().IsRegular() {
         return nil, fmt.Errorf("source input must be a regular file")
     }
     return root.ReadFile(path)
@@ -638,7 +678,7 @@ git commit -m "fix: reject unsafe source inputs"
 
 **Interfaces:**
 
-- Consumes: acquireOperationLock, materialize.SameEntryIdentity, and materialize.SamePathIdentity from Tasks 2–4.
+- Consumes: operationRoot, acquireOperationLock, materialize root-identity comparison, materialize.SameEntryIdentity, and materialize.SamePathIdentity from Tasks 2–4.
 - Produces: Service.Install and Service.Sync that lock only mutating operations, perform all reads/resolution/preflight before writes, return OutcomePlanned for Dry Run changes, and return OutcomeNoOp only when no changes exist.
 
 - [ ] **Step 1: Add failing service Dry Run and collision tests**
@@ -719,7 +759,7 @@ Expected: FAIL because current operations always write state/files and preflight
 
 - [ ] **Step 3: Implement lock lifecycle, Dry Run planning, and identity preflight**
 
-In both Install and Sync, acquire the lock immediately after required-root validation and before any state load or source resolution, guarded by DryRun. Use a release closure returning `error`; finalize the named operation result after all normal work so a failed removal is returned as `release operation lock: ...`.
+In both Install and Sync, canonicalize the root immediately after required-root validation. For mutating operations, acquire the lock on that canonical path before any state load or source resolution, capture its identity, and retain the existing explicit release closure. Validate the identity before preflight and before state persistence. For Dry Run, skip the lock but still use the canonical path.
 
 ~~~go
 var release func() error
@@ -753,7 +793,10 @@ if dryRun {
 
 Run adoption revalidation only on the mutating path immediately before materialization/state persistence. Keep existing atomic writers and cleanup behavior for non-Dry Run operations.
 
-Extend preflightFiles after path-key checks. The nested identity loop is deliberate O(n²); keep the ponytail ceiling comment and replace it with an indexed identity map only after large artifact sets make the cost measurable:
+Pass the expected operation-root identity into preflightFiles and
+prepareSyncUndesired. Centralize target observation in a small helper that calls
+materialize.Observe and rejects observations belonging to another root with
+ChangedSincePreflightError{Path: "."}. Extend preflightFiles after path-key checks. The nested identity loop is deliberate O(n²); keep the ponytail ceiling comment and replace it with an indexed identity map only after large artifact sets make the cost measurable:
 
 ~~~go
 for _, prior := range files {
@@ -989,7 +1032,7 @@ Check each item directly:
 - Existing repository-state atomic writers remain the only state persistence mechanism.
 - Scope boundaries remain unchanged: no Git acquisition, stale-lock takeover, rollback lifecycle, new step types, or broad filesystem interface.
 
-Run a literal placeholder-pattern scan over this plan; expected: no placeholder markers.
+Confirm all code examples contain concrete values and no unresolved text remains.
 
 - [ ] **Step 5: Final handoff without an unapproved commit**
 

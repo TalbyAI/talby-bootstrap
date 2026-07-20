@@ -28,6 +28,13 @@ Use the standard library and existing package boundaries:
   revalidation, and atomic target replacement.
 - `internal/repositorystate` keeps its existing atomic state writers.
 
+`internal/install` also keeps a private `operationRoot` value for mutating
+operations. It stores the canonical root path and the `os.FileInfo` identity
+captured after lock acquisition. The value validates that the root still names
+the locked directory before preflight and before state persistence. The lock
+lifecycle remains explicit at the two existing Install and Sync call sites;
+this slice does not add a lock wrapper.
+
 An exclusive `.tbboot-operation.lock` directory in the Operation Root is the
 cross-platform lock. Creating it with `os.Mkdir` is atomic; an existing path
 fails the operation. The lock is removed after the operation completes. A
@@ -39,13 +46,18 @@ deterministic and avoids adding platform-specific locking code in this slice.
 For mutating `install` and bare `install`/`Sync`:
 
 1. Resolve and canonicalize the Operation Root.
-2. Acquire the root lock before reading repository state or resolving a source.
-3. Load and validate manifest, lockfile, and materialization state.
+2. Acquire the root lock before reading repository state or resolving a source,
+   then capture its filesystem identity.
+3. Validate that identity and load and validate manifest, lockfile, and
+   materialization state.
 4. Resolve sources and build the complete desired operation.
-5. Validate source inputs, target paths, topology, special-file status, and
+5. Validate the locked root identity, source inputs, target paths, topology,
+   special-file status, and
    conflicting path identities before any write.
-6. Revalidate targets immediately before each atomic replacement.
-7. Write materialized files and repository state through existing atomic
+6. Revalidate root, existing parent identities, and targets immediately before
+   each atomic replacement.
+7. Validate the locked root identity immediately before repository-state
+   persistence, then write materialized files and repository state through existing atomic
    writers.
 8. Release the lock.
 
@@ -64,6 +76,9 @@ failures are returned instead of silently changing the scope of the operation.
 ## Safety rules
 
 - Relative source and target paths are normalized against the canonical root.
+- Mutating operations use the canonical root path for locking, state access,
+  source resolution, and target observation. An observation whose root
+  identity differs from the locked root is rejected.
 - Every consumed source path and every target parent component must be a real
   directory or regular file as appropriate; symlinks, Windows reparse points,
   and special files are rejected.
@@ -77,8 +92,12 @@ failures are returned instead of silently changing the scope of the operation.
 - Replacement uses a unique temporary file in the target's directory followed
   by confined same-directory rename, so readers never observe a partially
   written file.
-- Root, parent, target, and opened-directory identity are rechecked immediately
-  before replacement. A race becomes the existing typed drift/conflict path.
+- Root, every parent that existed during observation, target, and opened-directory
+  identity are rechecked immediately before replacement. A replaced existing
+  parent is a race even when the replacement has the same path and directory
+  type. Missing parents remain creatable.
+- Root identity drift uses `ChangedSincePreflightError` with path `.` so the
+  existing typed drift/conflict path remains unchanged.
 
 ## API and output changes
 
@@ -101,6 +120,8 @@ Add focused tests at public seams:
   rejection;
 - mode preservation, same-directory atomic replacement, and race
   revalidation;
+- replacement of an existing target parent by another directory, root identity
+  drift after lock acquisition, and observation/root identity mismatch;
 - human and JSON output, including `dry_run` and `planned`.
 
 Run focused package tests while implementing, then `just check`, plus a Windows
@@ -109,6 +130,7 @@ cross-build/test compilation for platform-specific code.
 ## Scope boundaries
 
 This slice does not add Git source acquisition, crash-recoverable advisory
-locks, rollback/recovery lifecycle, new materialization step types, or a broad
-filesystem interface. Those require separate contracts or platform-specific
-design work.
+locks, rollback/recovery lifecycle, new materialization step types, a broad
+filesystem interface, a shared reparse-point package, or a lock lifecycle
+wrapper. The repository-local `session-assumptions` skill remains intentionally
+bundled in this pull request but is outside this filesystem implementation.
