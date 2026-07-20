@@ -31,6 +31,12 @@ type Observation struct {
 	Digest       string
 	rootInfo     os.FileInfo
 	targetInfo   os.FileInfo
+	parents      []parentObservation
+}
+
+type parentObservation struct {
+	Path string
+	Info os.FileInfo
 }
 type ChangedSincePreflightError struct{ Path string }
 type targetParentError struct{}
@@ -59,14 +65,15 @@ func Observe(root, target string) (Observation, error) {
 	return observeRooted(opened, canonicalRoot, clean)
 }
 func observeRooted(root *os.Root, rootPath, target string) (Observation, error) {
-	if err := inspectParents(root, target); err != nil {
+	parents, err := inspectParents(root, target)
+	if err != nil {
 		return Observation{}, err
 	}
 	rootInfo, err := root.Stat(".")
 	if err != nil {
 		return Observation{}, err
 	}
-	ob := Observation{Root: rootPath, Path: filepath.ToSlash(target), AbsolutePath: filepath.Join(rootPath, target), Kind: EntryAbsent, rootInfo: rootInfo}
+	ob := Observation{Root: rootPath, Path: filepath.ToSlash(target), AbsolutePath: filepath.Join(rootPath, target), Kind: EntryAbsent, rootInfo: rootInfo, parents: parents}
 	info, err := root.Lstat(target)
 	if os.IsNotExist(err) {
 		return ob, nil
@@ -92,12 +99,13 @@ func observeRooted(root *os.Root, rootPath, target string) (Observation, error) 
 	ob.Digest = Digest(data)
 	return ob, nil
 }
-func inspectParents(root *os.Root, target string) error {
+func inspectParents(root *os.Root, target string) ([]parentObservation, error) {
 	parent := filepath.Dir(target)
 	if parent == "." {
-		return nil
+		return nil, nil
 	}
 	path := ""
+	parents := make([]parentObservation, 0)
 	for _, component := range strings.Split(parent, string(filepath.Separator)) {
 		path = filepath.Join(path, component)
 		info, err := root.Lstat(path)
@@ -105,13 +113,14 @@ func inspectParents(root *os.Root, target string) error {
 			continue
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !isRealDirectory(info) {
-			return targetParentError{}
+			return nil, targetParentError{}
 		}
+		parents = append(parents, parentObservation{Path: path, Info: info})
 	}
-	return nil
+	return parents, nil
 }
 func isRealDirectory(info os.FileInfo) bool {
 	return info.IsDir() && info.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0 && !isWindowsReparsePoint(info)
@@ -124,7 +133,25 @@ func PathKey(path string) string {
 	return path
 }
 func SameObservation(a, b Observation) bool {
-	return sameFileIdentity(a.rootInfo, b.rootInfo) && sameFileIdentity(a.targetInfo, b.targetInfo) && a.Root == b.Root && a.Path == b.Path && a.AbsolutePath == b.AbsolutePath && a.Kind == b.Kind && a.Mode == b.Mode && a.Digest == b.Digest
+	return sameFileIdentity(a.rootInfo, b.rootInfo) && sameFileIdentity(a.targetInfo, b.targetInfo) && sameParentObservations(a.parents, b.parents) && a.Root == b.Root && a.Path == b.Path && a.AbsolutePath == b.AbsolutePath && a.Kind == b.Kind && a.Mode == b.Mode && a.Digest == b.Digest
+}
+func SameRootIdentity(observation Observation, rootInfo os.FileInfo) bool {
+	return sameFileIdentity(observation.rootInfo, rootInfo)
+}
+func sameParentObservations(expected, current []parentObservation) bool {
+	for _, parent := range expected {
+		found := false
+		for _, candidate := range current {
+			if parent.Path == candidate.Path {
+				found = sameFileIdentity(parent.Info, candidate.Info)
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 func SameEntryIdentity(a, b Observation) bool {
 	return a.targetInfo != nil && b.targetInfo != nil && os.SameFile(a.targetInfo, b.targetInfo)

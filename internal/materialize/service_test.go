@@ -86,6 +86,33 @@ func TestWriteClassifiesParentTopologyRaceAsChanged(t *testing.T) {
 	}
 }
 
+func TestWriteRejectsReplacedTargetParent(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := Observe(root, "parent/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := parent + "-moved"
+	if err := os.Rename(parent, moved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var changed ChangedSincePreflightError
+	if err := Write(observed, []byte("content")); !errors.As(err, &changed) {
+		t.Fatalf("Write() error = %T %v, want parent identity drift", err, err)
+	}
+	if _, err := os.Stat(filepath.Join(parent, "file")); !os.IsNotExist(err) {
+		t.Fatalf("replacement parent target error = %v, want not exist", err)
+	}
+}
+
 func TestObserveRejectsExistingSymlinkPathComponent(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {

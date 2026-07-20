@@ -120,17 +120,20 @@ func (service Service) Install(ctx context.Context, request Request) (result Res
 	if request.Source.Version != "" {
 		return Result{}, fmt.Errorf("requested source versions are not supported")
 	}
-	var release func() error
-	if !request.DryRun {
-		release, err = acquireOperationLock(request.Root)
-		if err != nil {
-			return Result{}, err
-		}
+	operation, release, err := openOperationRoot(request.Root, request.DryRun)
+	if err != nil {
+		return Result{}, err
+	}
+	request.Root = operation.path
+	if release != nil {
 		defer func() {
 			if releaseErr := release(); releaseErr != nil {
 				err = errors.Join(err, fmt.Errorf("release operation lock: %w", releaseErr))
 			}
 		}()
+	}
+	if err := operation.validate(); err != nil {
+		return Result{}, err
 	}
 	identity, err := repositorystate.NormalizeSourceIdentity(request.Root, repositorystate.SourceIdentity{Type: request.Source.Type, Locator: request.Source.Locator})
 	if err != nil {
@@ -188,6 +191,9 @@ func (service Service) Install(ctx context.Context, request Request) (result Res
 		if request.DryRun {
 			return Result{Operation: "install", Outcome: OutcomePlanned, DryRun: true, ArtifactCount: len(selected), Changes: []Change{{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact}}}, nil
 		}
+		if err := operation.validate(); err != nil {
+			return Result{}, err
+		}
 		if err := service.store.WriteManifest(ctx, request.Root, next); err != nil {
 			return Result{}, err
 		}
@@ -234,7 +240,10 @@ func (service Service) Install(ctx context.Context, request Request) (result Res
 	if kind == repositorystate.ChangeKindInserted {
 		prepared.Changes = append(prepared.Changes, Change{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact})
 	}
-	prepared.Files, prepared.Conflicts, err = preflightFiles(request.Root, desired, record)
+	if err := operation.validate(); err != nil {
+		return Result{}, err
+	}
+	prepared.Files, prepared.Conflicts, err = preflightFiles(request.Root, desired, record, operation.info)
 	if err != nil {
 		return Result{}, err
 	}
@@ -242,7 +251,7 @@ func (service Service) Install(ctx context.Context, request Request) (result Res
 		result := resultForConflicts("install", len(desired), prepared.Conflicts, request.DryRun)
 		return result, UserActionError{Result: result}
 	}
-	return service.persistPrepared(ctx, request.Root, "install", prepared, &next, request.DryRun)
+	return service.persistPrepared(ctx, request.Root, "install", prepared, &next, request.DryRun, operation)
 }
 func selectedArtifacts(resolved source.ResolvedSource, target repositorystate.DeclarationTarget) ([]source.ArtifactDescriptor, error) {
 	if target.Scope == repositorystate.DeclarationScopeSource {
