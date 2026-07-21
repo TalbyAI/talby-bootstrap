@@ -50,7 +50,7 @@ func TestSyncJSONIncludesFileRemovedChange(t *testing.T) {
 
 - [ ] **Step 2: Add the JSON conflict regression for unsafe topology**
 
-Add TestSyncJSONIncludesUnsafeTopologyConflict. Create a source fixture targeting nested/a, perform the initial explicit install, replace the consumer nested directory with a symlink to an outside temporary directory, and skip only when symlink creation is unavailable. Run JSON targetless Sync and assert exit 2, empty stdout, a JSON stderr envelope, and a conflict with kind unsafe_topology and path nested/a.
+Add TestSyncJSONIncludesUnsafeTopologyConflict. Create a source fixture targeting nested/a, perform the initial explicit install, replace the consumer nested directory with a symlink to an outside temporary directory, and skip only when symlink creation is unavailable. Run targetless `install` in JSON mode (the CLI's Sync reconciliation path) and assert exit 2, empty stdout, a JSON stderr envelope, and a conflict with kind unsafe_topology and path nested/a.
 
 ~~~go
 func TestSyncJSONIncludesUnsafeTopologyConflict(t *testing.T) {
