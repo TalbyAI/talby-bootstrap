@@ -413,6 +413,11 @@ func prepareSyncUndesired(root string, desired []desiredArtifact, lock repositor
 						safeToRemove = false
 						continue
 					}
+					if errors.Is(err, os.ErrPermission) {
+						conflicts = append(conflicts, Conflict{Kind: ConflictTopology, Source: a.Source, Artifact: a.Artifact, Paths: []string{file.Path}})
+						safeToRemove = false
+						continue
+					}
 					return repositorystate.Lockfile{}, nil, nil, nil, err
 				}
 				if observed.Kind != materialize.EntryRegular || observed.Digest != file.Digest {
@@ -512,24 +517,6 @@ func revalidateAdoptions(files []plannedFile) error {
 	return nil
 }
 func (service Service) persistPrepared(ctx context.Context, root, operation string, prepared preparedOperation, manifest *repositorystate.Manifest, dryRun bool, expectedRoot ...operationRoot) (Result, error) {
-	if !dryRun {
-		if err := revalidateAdoptions(prepared.Files); err != nil {
-			var changed materialize.ChangedSincePreflightError
-			if errors.As(err, &changed) {
-				conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
-				for _, file := range slices.Concat(prepared.Files, prepared.Removals) {
-					if file.Observed.Path == changed.Path {
-						conflict.Source = file.Artifact.Key.Source
-						conflict.Artifact = file.Artifact.Key.Name
-						break
-					}
-				}
-				result := resultForConflicts(operation, len(prepared.Desired), []Conflict{conflict}, false)
-				return result, UserActionError{Result: result}
-			}
-			return Result{}, err
-		}
-	}
 	record, changes, created, err := applyPrepared(root, prepared, dryRun)
 	if err != nil {
 		cleanup(created)
@@ -547,6 +534,25 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 			return result, UserActionError{Result: result}
 		}
 		return Result{}, err
+	}
+	if !dryRun {
+		if err := revalidateAdoptions(prepared.Files); err != nil {
+			cleanup(created)
+			var changed materialize.ChangedSincePreflightError
+			if errors.As(err, &changed) {
+				conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
+				for _, file := range slices.Concat(prepared.Files, prepared.Removals) {
+					if file.Observed.Path == changed.Path {
+						conflict.Source = file.Artifact.Key.Source
+						conflict.Artifact = file.Artifact.Key.Name
+						break
+					}
+				}
+				result := resultForConflicts(operation, len(prepared.Desired), []Conflict{conflict}, false)
+				return result, UserActionError{Result: result}
+			}
+			return Result{}, err
+		}
 	}
 	if dryRun {
 		if len(changes) == 0 {

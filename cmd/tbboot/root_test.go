@@ -289,6 +289,110 @@ func TestSyncJSONIncludesTypedEffectiveChanges(t *testing.T) {
 	})
 }
 
+func TestSyncJSONIncludesFileRemovedChange(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	withDir(t, root, func() {
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot}, &bytes.Buffer{}, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+			t.Fatalf("setup install exit code = %d, want 0", code)
+		}
+		store := repositorystate.NewStore()
+		manifest, err := store.LoadManifest(context.Background(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest.Declarations = nil
+		if err := store.WriteManifest(context.Background(), root, manifest); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		if code := execute(context.Background(), []string{"--output", "json", "install", "--prune"}, &stdout, &stderr); code != int(app.ExitSuccess) {
+			t.Fatalf("prune exit code = %d, stderr = %q", code, stderr.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("stderr = %q, want empty", stderr.String())
+		}
+		var envelope app.Result
+		if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Details["outcome"] != "applied" {
+			t.Fatalf("outcome = %#v, want applied", envelope.Details["outcome"])
+		}
+		changes, ok := envelope.Details["changes"].([]any)
+		if !ok {
+			t.Fatalf("changes = %#v, want array", envelope.Details["changes"])
+		}
+		for _, raw := range changes {
+			change, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("change = %#v, want object", raw)
+			}
+			if change["kind"] == "file_removed" {
+				if change["path"] != "README.md" || change["ownership_kind"] != "whole_file" {
+					t.Fatalf("file removal change = %#v", change)
+				}
+				return
+			}
+		}
+		t.Fatalf("changes = %#v, missing file_removed", changes)
+	})
+}
+
+func TestSyncJSONIncludesUnsafeTopologyConflict(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	writeFixture(t, sourceRoot, "nested", "nested/a", "hello\n")
+	initGitRepo(t, root)
+
+	withDir(t, root, func() {
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot}, &bytes.Buffer{}, &bytes.Buffer{}); code != int(app.ExitSuccess) {
+			t.Fatalf("setup install exit code = %d, want 0", code)
+		}
+		if err := os.RemoveAll(filepath.Join(root, "nested")); err != nil {
+			t.Fatal(err)
+		}
+		outside := t.TempDir()
+		if err := os.Symlink(outside, filepath.Join(root, "nested")); err != nil {
+			t.Skipf("symlink: %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		if code := execute(context.Background(), []string{"--output", "json", "install"}, &stdout, &stderr); code != int(app.ExitUserActionConflict) {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("stdout = %q, want empty", stdout.String())
+		}
+		var envelope app.Result
+		if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		conflicts, ok := envelope.Details["conflicts"].([]any)
+		if !ok {
+			t.Fatalf("conflicts = %#v, want array", envelope.Details["conflicts"])
+		}
+		for _, raw := range conflicts {
+			conflict, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("conflict = %#v, want object", raw)
+			}
+			if conflict["kind"] == "unsafe_topology" {
+				paths, ok := conflict["paths"].([]any)
+				if !ok || len(paths) != 1 || paths[0] != "nested/a" {
+					t.Fatalf("unsafe topology paths = %#v, want [nested/a]", conflict["paths"])
+				}
+				return
+			}
+		}
+		t.Fatalf("conflicts = %#v, missing unsafe_topology", conflicts)
+	})
+}
+
 func TestChangeProvenanceInHumanAndJSONOutput(t *testing.T) {
 	change := installsvc.Change{
 		Kind:          installsvc.ChangeFileCreated,
