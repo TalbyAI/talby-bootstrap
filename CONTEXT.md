@@ -347,7 +347,7 @@ _Avoid_: Expected update, normal sync
 - **Declare-Only Install** updates only the **Manifest**
 - Catalog commands and **Search Command** are deferred beyond 0.1
 - **Sync** reconciles actual state against the **Manifest** and its **Resolution**
-- **Dry Run** is deferred beyond 0.1
+- **Dry Run** is implemented for explicit install, declaration-only install, and targetless reconciliation; it performs no writes and reports planned changes
 - The canonical **CLI Command Name** for this tool is `tbboot`
 - A **Managed Artifact** is eligible for whole-file drift detection by **Sync**
 - A **Managed Artifact** is materialized by applying its declared whole-file `file` **Materialization Steps**

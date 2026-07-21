@@ -20,6 +20,14 @@ The architecture is organized around five stable responsibilities:
 - **Materialization**: applies whole-file `file` steps and tracks the existing ownership record.
 - **Operation reporting**: emits the current human and machine-readable install results.
 
+## Persistence and filesystem safety
+
+The six persisted YAML documents use integer `schema_version: 1`, strict readers, deterministic writers, and canonical `tbboot-` filenames. Consumer-facing and persisted Source References are scalar `file:<locator>` or `git:<locator>` values. The 0.1 implementation stores and validates Git identities but acquires local `file:` Sources only; it does not migrate earlier filenames or structured source objects.
+
+Mutating operations resolve one canonical Operation Root, acquire an exclusive root-scoped operation lock before reading state or resolving sources, and revalidate root, parent, source, and target identity before writes. Source and target paths must remain confined to their allowed roots and must reject symlinks, reparse points, special files, unsafe topology, and identity-changing races. File replacement uses a same-directory temporary file and atomic rename; existing modes are preserved and new files use `0644`.
+
+Dry Run follows the same read, resolve, and preflight path without acquiring the mutation lock or writing Manifest, Lockfile, Materialization Record, Recovery State, or target files. Planned changes are reported as `planned`; unchanged operations remain `no_op`.
+
 ## Decision index
 
 - [ADR-0001: CLI surfaces and command model](docs/adr/0001-cli-surfaces-and-command-model.md)
@@ -41,5 +49,5 @@ The architecture is organized around five stable responsibilities:
 - Git acquisition and other Source Types.
 - Catalog browsing, search, upgrade, and catalog maintenance commands.
 - Fragment, template, script, and prompt materialization.
-- Full filesystem race protection and rollback lifecycle.
+- Crash-recoverable operation locks, durable backups, and the full rollback lifecycle.
 - Rich version constraints, source/materialization caches, and persisted operation logs.

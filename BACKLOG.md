@@ -69,3 +69,17 @@ Priority: unprioritized
 Implement dependencies between **Sources** and **Artifacts** so an **Artifact** can declare that another Artifact must be installed first.
 
 This idea needs further discussion before acceptance, including dependency identity, ordering, cycle detection, and failure handling.
+
+## Prevent duplicate assistant responses across message channels
+
+Priority: unprioritized
+
+Define and enforce a response contract that prevents the same summary or question from appearing in both `commentary` and `final` output. First distinguish whether duplication comes from one commentary plus one final message, multiple final messages, or repeated content inside one message. Prefer one visible source of truth; treat client-side exact deduplication as a fallback rather than the primary fix.
+
+This idea needs further discussion before acceptance, including the channel contract, renderer behavior, skill-level guidance, and a small regression check for each duplication pattern.
+
+## Create a documentation lifecycle cleanup skill
+
+Priority: unprioritized
+
+Create a skill that guides inventory, reusable-rule extraction, canonical placement, contradiction search, temporary-plan/spec deletion, fixture README updates, validation, and pre-commit review when cleaning a repository's design archive.
