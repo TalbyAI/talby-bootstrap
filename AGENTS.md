@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository contains both Talby Bootstrap product documentation and the Go implementation of the `tbboot` CLI. Top-level files such as `CONTEXT.md`, `ARCHITECTURE.md`, and `UBIQUITOUS_LANGUAGE.md` hold core product language and decisions. Architecture decisions live in `docs/adr/`; temporary design work may use `docs/superpowers/specs/` and `docs/superpowers/plans/`, but those files are working material rather than sources of truth. Review and research artifacts live under `docs/reviews/` and `docs/research/`.
+This repository contains both Talby Bootstrap product documentation and the Go implementation of the `tbboot` CLI. Top-level files such as `CONTEXT.md`, `ARCHITECTURE.md`, and `UBIQUITOUS_LANGUAGE.md` have distinct canonical ownership described below. Architecture decisions live in `docs/adr/`; temporary design work may use `docs/superpowers/specs/` and `docs/superpowers/plans/`, but those files are working material rather than sources of truth. Review and research artifacts live under `docs/reviews/` and `docs/research/`.
 
 Go entrypoint code lives in `main.go`. CLI surface area lives in `cmd/tbboot/`. Reusable command-independent behavior belongs under `internal/`, grouped by domain such as `internal/install/`, `internal/source/`, and `internal/app/`.
 

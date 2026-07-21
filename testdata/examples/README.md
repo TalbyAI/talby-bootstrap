@@ -14,7 +14,7 @@ Each example contains:
 - `consumer/` for the initial consumer repository state.
 - `expected/` for the normative expected results.
 
-Examples that acquire published content also contain `source/`.
+Examples that use a local `file:` Source also contain `source/`.
 
 ## Metadata and verification
 
