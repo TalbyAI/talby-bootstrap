@@ -30,6 +30,7 @@ type plannedFile struct {
 type preparedOperation struct {
 	Desired   []desiredArtifact
 	Files     []plannedFile
+	Removals  []plannedFile
 	Lockfile  repositorystate.Lockfile
 	Record    repositorystate.MaterializationRecord
 	Changes   []Change
@@ -70,7 +71,7 @@ func (service Service) Sync(ctx context.Context, request SyncRequest) (result Re
 	if err := repositorystate.ValidateCrossDocumentState(lock, record); err != nil {
 		return Result{}, err
 	}
-	prepared, err := service.prepare(ctx, request.Root, manifest, lock, record, operation.info)
+	prepared, err := service.prepare(ctx, request.Root, manifest, lock, record, request.Prune, operation.info)
 	if err != nil {
 		return Result{}, err
 	}
@@ -80,7 +81,7 @@ func (service Service) Sync(ctx context.Context, request SyncRequest) (result Re
 	}
 	return service.persistPrepared(ctx, request.Root, "sync", prepared, nil, request.DryRun, operation)
 }
-func (service Service) prepare(ctx context.Context, root string, manifest repositorystate.Manifest, lock repositorystate.Lockfile, record repositorystate.MaterializationRecord, expectedRoot ...os.FileInfo) (preparedOperation, error) {
+func (service Service) prepare(ctx context.Context, root string, manifest repositorystate.Manifest, lock repositorystate.Lockfile, record repositorystate.MaterializationRecord, prune bool, expectedRoot ...os.FileInfo) (preparedOperation, error) {
 	declarations := append([]repositorystate.Declaration(nil), manifest.Declarations...)
 	slices.SortFunc(declarations, func(a, b repositorystate.Declaration) int {
 		return strings.Compare(repositorystate.DeclarationKey(a), repositorystate.DeclarationKey(b))
@@ -132,7 +133,7 @@ func (service Service) prepare(ctx context.Context, root string, manifest reposi
 	prepared.Files = files
 	prepared.Conflicts = conflicts
 	var changes []Change
-	prepared.Lockfile, changes, conflicts, err = prepareSyncUndesired(root, prepared.Desired, prepared.Lockfile, record, expectedRoot...)
+	prepared.Lockfile, prepared.Removals, changes, conflicts, err = prepareSyncUndesired(root, prepared.Desired, prepared.Lockfile, record, prune, expectedRoot...)
 	if err != nil {
 		return preparedOperation{}, err
 	}
@@ -251,6 +252,8 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 			}
 		}
 		observations := make([]materialize.Observation, len(artifact.Descriptor.Steps))
+		validObservation := make([]bool, len(artifact.Descriptor.Steps))
+		topologyConflict := false
 		expected := map[string]struct{}{}
 		for i, step := range artifact.Descriptor.Steps {
 			if step.Type != "file" {
@@ -258,8 +261,15 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 			}
 			observed, err := observeTarget(root, step.TargetPath, expectedRoot...)
 			if err != nil {
+				var topology materialize.UnsafeTopologyError
+				if errors.As(err, &topology) {
+					topologyConflict = true
+					conflicts = append(conflicts, Conflict{Kind: ConflictTopology, Source: artifact.Key.Source, Artifact: artifact.Key.Name, Paths: []string{topology.Path}})
+					continue
+				}
 				return nil, nil, err
 			}
+			validObservation[i] = true
 			path := materialize.PathKey(filepath.FromSlash(observed.Path))
 			if _, ok := expected[path]; ok {
 				return nil, nil, fmt.Errorf("duplicate desired target %q", step.TargetPath)
@@ -267,7 +277,7 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 			expected[path] = struct{}{}
 			observations[i] = observed
 		}
-		if isManaged {
+		if isManaged && !topologyConflict {
 			if len(expected) != len(managed.Files) {
 				return nil, nil, fmt.Errorf("managed artifact path set does not match desired artifact")
 			}
@@ -279,6 +289,9 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 		}
 	targetSteps:
 		for i, step := range artifact.Descriptor.Steps {
+			if !validObservation[i] {
+				continue
+			}
 			observed := observations[i]
 			path := materialize.PathKey(observed.AbsolutePath)
 			relativePath := materialize.PathKey(filepath.FromSlash(observed.Path))
@@ -377,54 +390,99 @@ func preflightFiles(root string, desired []desiredArtifact, record repositorysta
 	}
 	return files, conflicts, nil
 }
-func prepareSyncUndesired(root string, desired []desiredArtifact, lock repositorystate.Lockfile, record repositorystate.MaterializationRecord, expectedRoot ...os.FileInfo) (repositorystate.Lockfile, []Change, []Conflict, error) {
+func prepareSyncUndesired(root string, desired []desiredArtifact, lock repositorystate.Lockfile, record repositorystate.MaterializationRecord, prune bool, expectedRoot ...os.FileInfo) (repositorystate.Lockfile, []plannedFile, []Change, []Conflict, error) {
 	keys := map[repositorystate.ArtifactKey]struct{}{}
 	for _, d := range desired {
 		keys[d.Key] = struct{}{}
 	}
+	var removals []plannedFile
 	var conflicts []Conflict
 	for _, a := range record.Artifacts {
 		if _, ok := keys[repositorystate.ManagedArtifactKey(a)]; !ok {
-			conflicts = append(conflicts, Conflict{Kind: ConflictRemovalRequired, Source: a.Source, Artifact: a.Artifact})
+			if !prune {
+				conflicts = append(conflicts, Conflict{Kind: ConflictRemovalRequired, Source: a.Source, Artifact: a.Artifact})
+			}
+			observedFiles := make([]plannedFile, 0, len(a.Files))
+			safeToRemove := true
 			for _, file := range a.Files {
 				observed, err := observeTarget(root, file.Path, expectedRoot...)
 				if err != nil {
-					return repositorystate.Lockfile{}, nil, nil, err
+					var topology materialize.UnsafeTopologyError
+					if errors.As(err, &topology) {
+						conflicts = append(conflicts, Conflict{Kind: ConflictTopology, Source: a.Source, Artifact: a.Artifact, Paths: []string{topology.Path}})
+						safeToRemove = false
+						continue
+					}
+					return repositorystate.Lockfile{}, nil, nil, nil, err
 				}
 				if observed.Kind != materialize.EntryRegular || observed.Digest != file.Digest {
 					conflicts = append(conflicts, Conflict{Kind: ConflictDrift, Source: a.Source, Artifact: a.Artifact, Paths: []string{file.Path}})
+					safeToRemove = false
+					continue
 				}
+				observedFiles = append(observedFiles, plannedFile{
+					Artifact: desiredArtifact{
+						Key:             repositorystate.ArtifactKey{Source: a.Source, Name: a.Artifact},
+						Resolution:      repositorystate.ArtifactResolution{Name: a.Artifact, Version: a.ArtifactVersion},
+						ResolvedVersion: a.ResolvedVersion,
+					},
+					Observed: observed,
+					Digest:   file.Digest,
+					Change:   ChangeFileRemoved,
+				})
+			}
+			if prune && safeToRemove {
+				removals = append(removals, observedFiles...)
 			}
 		}
 	}
 	next, removed := lock.KeepArtifacts(keys)
 	changes := make([]Change, 0, len(removed))
 	for _, key := range removed {
-		if _, managed := record.Artifact(key); !managed {
+		if prune {
+			resolution, _, _ := lock.Artifact(key)
+			changes = append(changes, Change{Kind: ChangeLockPruned, Source: key.Source, SourceVersion: resolution.ResolvedVersion, Artifact: key.Name})
+		} else if _, managed := record.Artifact(key); !managed {
 			resolution, _, _ := lock.Artifact(key)
 			changes = append(changes, Change{Kind: ChangeLockPruned, Source: key.Source, SourceVersion: resolution.ResolvedVersion, Artifact: key.Name})
 		}
 	}
-	return next, changes, conflicts, nil
+	return next, removals, changes, conflicts, nil
 }
 func applyPrepared(root string, prepared preparedOperation, dryRun bool) (repositorystate.MaterializationRecord, []Change, []string, error) {
 	record := prepared.Record
 	changes := append([]Change(nil), prepared.Changes...)
 	var created []string
-	slices.SortFunc(prepared.Files, func(a, b plannedFile) int {
-		return strings.Compare(repositorystate.SourceIdentityKey(a.Artifact.Key.Source)+"\x00"+a.Artifact.Key.Name+"\x00"+a.Observed.Path, repositorystate.SourceIdentityKey(b.Artifact.Key.Source)+"\x00"+b.Artifact.Key.Name+"\x00"+b.Observed.Path)
+	operations := append([]plannedFile(nil), prepared.Files...)
+	operations = append(operations, prepared.Removals...)
+	slices.SortFunc(operations, func(a, b plannedFile) int {
+		left := repositorystate.SourceIdentityKey(a.Artifact.Key.Source) + "\x00" + a.Artifact.Key.Name + "\x00" + a.Observed.Path + "\x00" + string(a.Change)
+		right := repositorystate.SourceIdentityKey(b.Artifact.Key.Source) + "\x00" + b.Artifact.Key.Name + "\x00" + b.Observed.Path + "\x00" + string(b.Change)
+		return strings.Compare(left, right)
 	})
 	byArtifact := map[repositorystate.ArtifactKey][]repositorystate.ManagedFileRecord{}
-	for _, file := range prepared.Files {
-		if !dryRun && (file.Change == ChangeFileCreated || file.Change == ChangeFileUpdated) {
-			if err := materialize.Write(file.Observed, file.Step.SourceBytes); err != nil {
+	removedArtifacts := map[repositorystate.ArtifactKey]struct{}{}
+	for _, file := range operations {
+		if !dryRun {
+			var err error
+			switch file.Change {
+			case ChangeFileCreated, ChangeFileUpdated:
+				err = materialize.Write(file.Observed, file.Step.SourceBytes)
+			case ChangeFileRemoved:
+				err = materialize.Remove(file.Observed)
+			}
+			if err != nil {
 				return record, nil, created, err
 			}
 			if file.Change == ChangeFileCreated {
 				created = append(created, file.Observed.AbsolutePath)
 			}
 		}
-		byArtifact[file.Artifact.Key] = append(byArtifact[file.Artifact.Key], repositorystate.ManagedFileRecord{Path: file.Observed.Path, Digest: file.Digest})
+		if file.Change == ChangeFileRemoved {
+			removedArtifacts[file.Artifact.Key] = struct{}{}
+		} else {
+			byArtifact[file.Artifact.Key] = append(byArtifact[file.Artifact.Key], repositorystate.ManagedFileRecord{Path: file.Observed.Path, Digest: file.Digest})
+		}
 		if file.Change != "" {
 			changes = append(changes, Change{Kind: file.Change, Source: file.Artifact.Key.Source, SourceVersion: file.Artifact.ResolvedVersion, Artifact: file.Artifact.Key.Name, Path: file.Observed.Path, OwnershipKind: OwnershipWholeFile})
 		}
@@ -435,6 +493,15 @@ func applyPrepared(root string, prepared preparedOperation, dryRun bool) (reposi
 			continue
 		}
 		record = repositorystate.UpsertManagedArtifact(record, managedRecordFor(d.Key.Source, source.ResolvedSource{Identity: source.Identity{Version: d.ResolvedVersion}}, d.Descriptor, files))
+	}
+	for key := range removedArtifacts {
+		values := make([]repositorystate.ManagedArtifactRecord, 0, len(record.Artifacts))
+		for _, artifact := range record.Artifacts {
+			if repositorystate.ManagedArtifactKey(artifact) != key {
+				values = append(values, artifact)
+			}
+		}
+		record = repositorystate.MaterializationRecord{Artifacts: values}
 	}
 	return record, changes, created, nil
 }
@@ -455,7 +522,7 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 			var changed materialize.ChangedSincePreflightError
 			if errors.As(err, &changed) {
 				conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
-				for _, file := range prepared.Files {
+				for _, file := range append(append([]plannedFile(nil), prepared.Files...), prepared.Removals...) {
 					if file.Observed.Path == changed.Path {
 						conflict.Source = file.Artifact.Key.Source
 						conflict.Artifact = file.Artifact.Key.Name
@@ -474,7 +541,7 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 		var changed materialize.ChangedSincePreflightError
 		if errors.As(err, &changed) {
 			conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
-			for _, file := range prepared.Files {
+			for _, file := range append(append([]plannedFile(nil), prepared.Files...), prepared.Removals...) {
 				if file.Observed.Path == changed.Path {
 					conflict.Source = file.Artifact.Key.Source
 					conflict.Artifact = file.Artifact.Key.Name
@@ -507,7 +574,7 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 		switch change.Kind {
 		case ChangeResolutionLocked, ChangeLockPruned:
 			lockChanged = true
-		case ChangeFileCreated, ChangeFileUpdated, ChangeOwnershipAdopted:
+		case ChangeFileCreated, ChangeFileUpdated, ChangeFileRemoved, ChangeOwnershipAdopted:
 			recordChanged = true
 		}
 	}

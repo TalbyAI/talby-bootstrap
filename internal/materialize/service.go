@@ -39,12 +39,12 @@ type parentObservation struct {
 	Info os.FileInfo
 }
 type ChangedSincePreflightError struct{ Path string }
-type targetParentError struct{}
+type UnsafeTopologyError struct{ Path string }
 
 func (err ChangedSincePreflightError) Error() string {
 	return fmt.Sprintf("target %q changed after preflight", err.Path)
 }
-func (targetParentError) Error() string { return "target parent must be a real directory" }
+func (UnsafeTopologyError) Error() string { return "target parent must be a real directory" }
 func Observe(root, target string) (Observation, error) {
 	if filepath.IsAbs(target) {
 		return Observation{}, fmt.Errorf("file target path must stay within operation root")
@@ -116,7 +116,7 @@ func inspectParents(root *os.Root, target string) ([]parentObservation, error) {
 			return nil, err
 		}
 		if !isRealDirectory(info) {
-			return nil, targetParentError{}
+			return nil, UnsafeTopologyError{Path: filepath.ToSlash(target)}
 		}
 		parents = append(parents, parentObservation{Path: path, Info: info})
 	}
@@ -171,7 +171,7 @@ func sameFileIdentity(a, b os.FileInfo) bool {
 }
 func validateObservation(observed, current Observation, err error) error {
 	if err != nil {
-		var parent targetParentError
+		var parent UnsafeTopologyError
 		if errors.As(err, &parent) {
 			return ChangedSincePreflightError{Path: observed.Path}
 		}
@@ -193,6 +193,34 @@ func Write(observed Observation, content []byte) error {
 	}
 	defer func() { _ = root.Close() }()
 	return writeRooted(root, observed, content)
+}
+
+func Remove(observed Observation) error {
+	root, err := os.OpenRoot(observed.Root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	if err := revalidateRoot(root, observed); err != nil {
+		return err
+	}
+	path := filepath.FromSlash(observed.Path)
+	parent, base := filepath.Dir(path), filepath.Base(path)
+	dir, err := root.OpenRoot(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ChangedSincePreflightError{Path: observed.Path}
+		}
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	if err := dir.Remove(base); err != nil {
+		if os.IsNotExist(err) {
+			return ChangedSincePreflightError{Path: observed.Path}
+		}
+		return err
+	}
+	return nil
 }
 func writeRooted(root *os.Root, observed Observation, content []byte) error {
 	if err := revalidateRoot(root, observed); err != nil {

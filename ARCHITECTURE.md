@@ -41,5 +41,5 @@ The architecture is organized around five stable responsibilities:
 - Git acquisition and other Source Types.
 - Catalog browsing, search, upgrade, and catalog maintenance commands.
 - Fragment, template, script, and prompt materialization.
-- Full filesystem race protection, operation locking, prune, and rollback lifecycle.
+- Full filesystem race protection and rollback lifecycle.
 - Rich version constraints, source/materialization caches, and persisted operation logs.

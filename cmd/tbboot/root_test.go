@@ -715,6 +715,57 @@ func TestMultipleDeclarationRealPathSync(t *testing.T) {
 	})
 }
 
+func TestPruneRequiresTargetlessInstall(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := execute(context.Background(), []string{"install", "--prune", "file:source"}, &bytes.Buffer{}, &stderr); code != int(app.ExitOperationalOrValidationError) {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "prune requires targetless install") {
+		t.Fatalf("stderr = %q, want prune validation", stderr.String())
+	}
+}
+
+func TestPruneRemovesManagedArtifactFromCompleteDesiredState(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	writeInstallFixture(t, sourceRoot)
+	initGitRepo(t, root)
+
+	withDir(t, root, func() {
+		if code := execute(context.Background(), []string{"install", "file:" + sourceRoot, "--artifact", "base-readme"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup install exit code = %d, want 0", code)
+		}
+		store := repositorystate.NewStore()
+		manifest, err := store.LoadManifest(context.Background(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest.Declarations = nil
+		if err := store.WriteManifest(context.Background(), root, manifest); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		if code := execute(context.Background(), []string{"install", "--prune"}, &stdout, &stderr); code != int(app.ExitSuccess) {
+			t.Fatalf("prune exit code = %d, stderr = %q", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "sync: applied") || !strings.Contains(stdout.String(), "file_removed") {
+			t.Fatalf("stdout = %q, want removal summary", stdout.String())
+		}
+		if _, err := os.Stat(filepath.Join(root, "README.md")); !os.IsNotExist(err) {
+			t.Fatalf("README.md stat = %v, want removed", err)
+		}
+		lock, err := store.LoadLockfile(context.Background(), root)
+		if err != nil || len(lock.Resolutions) != 0 {
+			t.Fatalf("lockfile = %#v, %v, want empty", lock, err)
+		}
+		record, err := store.LoadMaterializationRecord(context.Background(), root)
+		if err != nil || len(record.Artifacts) != 0 {
+			t.Fatalf("materialization record = %#v, %v, want empty", record, err)
+		}
+	})
+}
+
 func TestJSONOutputErrorsGoToStderrAsJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := execute(context.Background(), []string{"--output", "json", "install", "invalid"}, &stdout, &stderr); code != 1 {

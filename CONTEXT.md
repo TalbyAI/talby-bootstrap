@@ -4,7 +4,7 @@ Talby Bootstrap defines the language for a CLI that installs reusable repository
 
 ## Product 0.1 contract
 
-The 0.1 release is the active contract in this document. It has one implemented command surface: `tbboot install`, including direct scalar `file:<locator>` references, `--artifact`, `--declare-only`, and targetless reconciliation. The implemented acquisition path is local `file:` Sources: in-root Sources are allowed by default, while external absolute Sources require explicit Manifest approval of their **Source Identity**. The only materialization step is whole-file `file`.
+The 0.1 release is the active contract in this document. It has one implemented command surface: `tbboot install`, including direct scalar `file:<locator>` references, `--artifact`, `--declare-only`, targetless reconciliation, and explicit targetless `--prune`. The implemented acquisition path is local `file:` Sources: in-root Sources are allowed by default, while external absolute Sources require explicit Manifest approval of their **Source Identity**. The only materialization step is whole-file `file`.
 
 All six YAML documents use `schema_version: 1`, strict readers, deterministic writers, and these canonical filenames: `tbboot-source.yaml`, `tbboot-artifact.yaml`, `tbboot-artifacts.yaml`, `tbboot-artifacts.lock.yaml`, `tbboot-artifacts.managed.yaml`, and `tbboot-artifacts.recovery.yaml`. Persisted Source References are scalar `file:<locator>` or `git:<locator>` values; Git identities are stored and validated but not acquired in 0.1. There is no migration from earlier filenames or structured source objects.
 
@@ -245,7 +245,7 @@ The category of a **Materialization Step** that defines how that step is interpr
 _Avoid_: Artifact kind, source type
 
 **Removal Policy**:
-The deferred rule that determines how **Sync** handles a **Managed Artifact** that is no longer present in the final desired state. Prune is not implemented in 0.1.
+The rule that determines how **Sync** handles a **Managed Artifact** that is no longer present in the final desired state. Without `--prune`, Sync reports a **Removal-Required Conflict**. Targetless `tbboot install --prune` removes only unchanged whole files whose digests still match the **Materialization Record**.
 _Avoid_: Garbage collection, overwrite policy
 
 **Materialization Record**:
@@ -362,7 +362,7 @@ _Avoid_: Expected update, normal sync
 - Fragment boundaries and **Fragment Drift** are deferred beyond 0.1
 - **Whole-File Drift** is detected by comparing the current whole-file contents against the prior **Materialization Record**
 - **Whole-File Drift** is accumulated during preflight and blocks the entire mutation with a user-action conflict
-- Prune and broader **Removal Policy** behavior are deferred beyond 0.1
+- Targetless `tbboot install --prune` explicitly authorizes safe whole-file removal; drift, unsafe topology, and ownership conflicts still block the complete operation
 - A whole file already owned by the same **Managed Artifact** may be overwritten automatically when it still matches the prior **Materialization Record**
 
 ## Canonical examples
@@ -412,7 +412,7 @@ The remaining notes preserve earlier product exploration. They are not implement
 - source snapshots could be lost if only artifacts are versioned — resolved: keep both **Source Version** and per-**Artifact** versioning
 - artifact version authority could become duplicated — resolved: artifact version is defined only in the **Artifact Descriptor**
 - whole-source locking could be under-specified — resolved: lock the **Source Version** plus the exact resolved **Artifacts** and their versions
-- removal behavior could be destructive by default — resolved: prompt before removing a **Managed Artifact** no longer declared in the **Manifest**
+- removal behavior could be destructive by default — resolved: removal is blocked by default, and only targetless `tbboot install --prune` authorizes unchanged managed files to be removed
 - managed state could be tracked too coarsely — resolved: store a **Materialization Record** for whole files and bounded **Fragments**
 - fragment removal could become heuristic and unsafe — resolved: default to visible **Fragment Boundaries** for managed fragments
 - manual edits inside managed fragments could be lost silently — resolved: detect **Fragment Drift** and prompt before update or removal
@@ -576,7 +576,7 @@ This section preserves the current specification interview state by explicit use
   - Resolved:
     - **Sync** remains the underlying reconciliation operation
     - **Overwrite Policy** exists and may inspect Git state
-    - **Removal Policy** defaults to prompting before removing a **Managed Artifact**
+    - **Removal Policy** blocks removal by default; targetless `tbboot install --prune` explicitly authorizes unchanged managed whole files
     - **Catalog Remove** deletes associated **Catalog Cache**
     - removal is decided per final resolved **Managed Artifact**, not by the prior manifest declaration shape
     - whole-file content owned by the same **Managed Artifact** is overwritten automatically when it has no drift

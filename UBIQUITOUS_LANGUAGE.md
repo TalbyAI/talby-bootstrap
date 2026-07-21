@@ -97,7 +97,7 @@ In 0.1, the active materialization step type is whole-file `file`, and the CLI s
 >
 > **Dev:** "Can sync remove files silently if an artifact disappears?"
 >
-> **Domain expert:** "In 0.1, removal and prune are deferred; whole-file drift is checked through the **Materialization Record**."
+> **Domain expert:** "In 0.1, removal is blocked by default. Only targetless `tbboot install --prune` removes unchanged managed whole files, and whole-file drift is checked through the **Materialization Record**."
 
 ## Flagged ambiguities
 

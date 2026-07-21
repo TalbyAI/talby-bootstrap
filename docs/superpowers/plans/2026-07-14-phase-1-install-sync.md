@@ -17,12 +17,12 @@
 - Sync reproduces locked resolutions exactly and never upgrades them.
 - Repeating plain explicit `install` for an identical declaration reproduces its locked resolution and never upgrades it.
 - Declarations without a locked resolution are resolved during their first successful Sync.
-- A managed Artifact outside the final desired state causes a removal-required conflict before mutation.
+- A managed Artifact outside the final desired state causes a removal-required conflict before mutation unless targetless `tbboot install --prune` explicitly authorizes safe removal.
 - Sync performs no partial apply when preflight detects any conflict.
 - Direct `file:` Source Identity is its Source Type plus its canonical locator; published Source name is metadata only.
 - Relative `file:` locators are interpreted against the Operation Root and persisted in normalized root-relative form. Approved external locators are persisted in canonical absolute form.
 - Phase 1 does not support Source version input; add it when a version-selectable Source Type exists.
-- Phase 1 materializes only `file` steps. It adds no `git` Source, upgrade behavior, automatic removal, rollback transaction, generic planner, reconciliation package, or dependency.
+- Phase 1 materializes only `file` steps. It adds no `git` Source, upgrade behavior, implicit removal, rollback transaction, generic planner, reconciliation package, or dependency.
 - State schema version remains exactly `1`; old development-only schema shapes receive no migration path.
 - Tasks 1-5 form one compile migration and one reviewer gate. Their focused tests are checkpoints; do not create an intermediate commit while repository consumers still use a replaced API. Task 5 ends the migration with `go test -race ./... -count=1` before its commit-approval pause.
 - Before every plan commit, stop and obtain explicit user approval at that moment. Never treat earlier approval as permission.
@@ -225,7 +225,7 @@ func (lockfile Lockfile) UpsertResolution(resolution Resolution) (Lockfile, Chan
 func (lockfile Lockfile) KeepArtifacts(keys map[ArtifactKey]struct{}) (Lockfile, []ArtifactKey)
 ```
 
-Validation requires complete snapshot fields, at least one Artifact per snapshot, complete Artifact fields, unique snapshot keys, and each Artifact key in exactly one snapshot. `UpsertResolution` sorts copied Artifacts by name, merges missing Artifacts into an equal snapshot key, rejects an Artifact key already belonging to another snapshot, sorts snapshots by Source Identity then resolved version, and never mutates its receiver. `KeepArtifacts` removes unjustified Artifacts, drops empty snapshots, returns removed keys in the same deterministic Artifact-key order, and never treats pruning as automatic managed removal.
+Validation requires complete snapshot fields, at least one Artifact per snapshot, complete Artifact fields, unique snapshot keys, and each Artifact key in exactly one snapshot. `UpsertResolution` sorts copied Artifacts by name, merges missing Artifacts into an equal snapshot key, rejects an Artifact key already belonging to another snapshot, sorts snapshots by Source Identity then resolved version, and never mutates its receiver. `KeepArtifacts` removes unjustified Artifacts, drops empty snapshots, returns removed keys in the same deterministic Artifact-key order, and never authorizes managed-file removal by itself.
 
 `internal/repositorystate/materialization_record.go` must provide:
 
@@ -524,6 +524,7 @@ const (
  ChangeDeclarationAdded ChangeKind = "declaration_added"
  ChangeFileCreated       ChangeKind = "file_created"
  ChangeFileUpdated       ChangeKind = "file_updated"
+ ChangeFileRemoved       ChangeKind = "file_removed"
  ChangeOwnershipAdopted  ChangeKind = "ownership_adopted"
  ChangeResolutionLocked  ChangeKind = "resolution_locked"
  ChangeLockPruned        ChangeKind = "lock_pruned"
@@ -542,6 +543,7 @@ const (
  ConflictIntent         ConflictKind = "intent"
  ConflictOwnership      ConflictKind = "ownership"
  ConflictDrift          ConflictKind = "drift"
+ ConflictTopology       ConflictKind = "unsafe_topology"
  ConflictRemovalRequired ConflictKind = "removal_required"
 )
 
@@ -674,6 +676,8 @@ func TestSyncRejectsManagedVersionAndPathSetMismatch(t *testing.T)
 func TestSyncReconstructsMissingLockOnlyOnExactManagedMatch(t *testing.T)
 func TestSyncPrunesStaleUnmanagedLockState(t *testing.T)
 func TestSyncEmptyManifestPrunesOrRequiresRemoval(t *testing.T)
+func TestSyncPruneRemovesUnchangedManagedArtifact(t *testing.T)
+func TestSyncPruneBlocksOnDriftWithoutWrites(t *testing.T)
 func TestSyncRejectsUnsupportedStepOnlyWhenSelected(t *testing.T)
 func TestSyncFailsAtFirstResolutionErrorInDeclarationOrder(t *testing.T)
 func TestSyncUsesCapturedBytesAndRevalidatesTarget(t *testing.T)
@@ -753,7 +757,7 @@ func revalidateAdoptions(files []plannedFile) error
 func (service Service) persistPrepared(ctx context.Context, root string, operation string, prepared preparedOperation, manifest *repositorystate.Manifest) (Result, error)
 ```
 
-`preflightFiles` evaluates only desired Artifacts. It checks their targets against the complete record for ownership and drift but never infers that an unselected managed Artifact should be removed. `prepareSyncUndesired` is the only helper that adds `removal_required`, checks drift on removed Artifacts, and prunes stale unmanaged Lockfile entries; only `prepare` calls it. `revalidateAdoptions` calls `materialize.Observe(file.Observed.Root, file.Observed.Path)` for every `ownership_adopted` file and returns `materialize.ChangedSincePreflightError` unless `materialize.SameObservation` remains true.
+`preflightFiles` evaluates only desired Artifacts. It checks their targets against the complete record for ownership, drift, and unsafe topology but never infers that an unselected managed Artifact should be removed. `prepareSyncUndesired` adds `removal_required` without `--prune`, checks drift and unsafe topology on removed Artifacts, and creates removal plans only when every recorded file is unchanged; only `prepare` calls it. `revalidateAdoptions` calls `materialize.Observe(file.Observed.Root, file.Observed.Path)` for every `ownership_adopted` file and returns `materialize.ChangedSincePreflightError` unless `materialize.SameObservation` remains true.
 
 `persistPrepared` calls `applyPrepared`, then `revalidateAdoptions` after consumer writes and immediately before any state write. It maps a changed adoption to a drift `UserActionError`. On success it writes each changed state file in Lockfile, Materialization Record, then optional Manifest order; `manifest == nil` means Sync leaves Manifest unchanged. It omits every state write for a no-op. On application or persistence failure it removes only consumer files created by this operation. Already replaced consumer or state files retain phase 1 best-effort semantics; this function does not claim transactionality.
 
@@ -808,7 +812,7 @@ For each observed target:
 - Managed regular matching recorded digest but differing desired bytes: `file_updated`.
 - Managed record whose resolved Source version, Artifact version, or canonical path set differs from desired: operational persisted-state error.
 
-After `preflightFiles`, `prepare` calls `prepareSyncUndesired`. That Sync-only helper adds `removal_required` for every managed Artifact absent from final Manifest-derived desired state, plus drift paths detectable from its recorded files. It never auto-removes managed state. It prunes only stale Lockfile Artifacts without managed state. Explicit install does not call this helper. Sort combined conflicts with:
+After `preflightFiles`, `prepare` calls `prepareSyncUndesired`. That Sync-only helper adds `removal_required` for every managed Artifact absent from final Manifest-derived desired state unless `--prune` authorizes safe removal, plus drift and unsafe-topology paths detectable from its recorded files. It prunes only stale Lockfile Artifacts without managed state unless explicit prune is active. Explicit install does not call this helper. Sort combined conflicts with:
 
 ```go
 slices.SortFunc(conflicts, func(left, right Conflict) int {
@@ -822,7 +826,7 @@ Any conflict returns before consumer or state writes.
 
 - [ ] **Step 6: Implement deterministic application and persistence**
 
-Sort planned files by Source Identity, Artifact, and path. Call `materialize.Write` only for `file_created` and `file_updated`; adoption writes no consumer bytes. Build managed records from desired digests. Before any state write, call `revalidateAdoptions` so adopted files cannot change between preflight and ownership recording without producing drift. Emit effective changes only. Persist Lockfile when newly locked or pruned and Materialization Record when files changed or ownership was adopted. A no-op performs no state write. Use `resolution_locked` once per newly pinned declaration and `lock_pruned` once per pruned Artifact. Return Artifact count from final desired set.
+Sort planned writes and removals by Source Identity, Artifact, and path. Call `materialize.Write` only for `file_created` and `file_updated`, and `materialize.Remove` only for explicitly authorized `file_removed`; adoption writes no consumer bytes. Build managed records from desired digests and remove pruned records. Before any state write, call `revalidateAdoptions` so adopted files cannot change between preflight and ownership recording without producing drift. Emit effective changes only. Persist Lockfile when newly locked or pruned and Materialization Record when files changed, adopted ownership, or removed artifacts. A no-op performs no state write. Use `resolution_locked` once per newly pinned declaration and `lock_pruned` once per pruned Artifact. Return Artifact count from final desired set.
 
 On `materialize.ChangedSincePreflightError`, return a drift-class `UserActionError`. Track newly created absolute paths and remove only those if later apply/state persistence fails. Do not revert updated consumer files or state files already replaced before a later operational failure; phase 1 explicitly makes no full-rollback claim.
 
@@ -950,7 +954,7 @@ For JSON errors, when error is `UserActionError`, encode its Result fields in `d
 
 - [ ] **Step 5: Add one real multi-declaration end-to-end case**
 
-In `cmd/tbboot/examples_e2e_test.go`, create a temporary repo containing two `file:` Sources and a Manifest with one source-level declaration plus one artifact-level declaration. First bare install must create all selected files, Lockfile snapshot blocks, and Materialization Records. Second bare install must return `no_op`, leave all bytes unchanged, and report exact Artifact count. Modify an owned file and remove one declaration; third run must return exit `2`, report both drift and removal-required, and leave consumer and all three state files unchanged.
+In `cmd/tbboot/examples_e2e_test.go`, create a temporary repo containing two `file:` Sources and a Manifest with one source-level declaration plus one artifact-level declaration. First bare install must create all selected files, Lockfile snapshot blocks, and Materialization Records. Second bare install must return `no_op`, leave all bytes unchanged, and report exact Artifact count. Modify an owned file and remove one declaration; third run must return exit `2`, report both drift and removal-required, and leave consumer and all three state files unchanged. A targetless `install --prune` with an unchanged removed artifact must instead remove its files and state deterministically.
 
 - [ ] **Step 6: Run full validation**
 

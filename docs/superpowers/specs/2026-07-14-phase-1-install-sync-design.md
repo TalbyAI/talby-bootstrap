@@ -12,14 +12,14 @@ Earlier designs established repository-state persistence, declare-only installat
 
 ## Goal
 
-Complete phase 1 so bare `tbboot install` can reconcile multiple declarations and produce predictable no-op, apply, drift, ownership-conflict, and removal-required outcomes.
+Complete phase 1 so bare `tbboot install` can reconcile multiple declarations and produce predictable no-op, apply, drift, ownership-conflict, removal-required, and explicitly pruned outcomes.
 
 ## Non-goals
 
 This design does not add:
 
 - Floating Source behavior;
-- automatic managed-artifact removal;
+- implicit managed-artifact removal;
 - `upgrade` behavior;
 - a real `git` Source;
 - fragment, template, script, or prompt materialization;
@@ -37,7 +37,7 @@ Phase 1 uses these product rules:
 - Sync reproduces locked resolutions exactly and never upgrades them.
 - Repeating plain explicit `install` for an identical declaration also reproduces its locked resolution and never upgrades it.
 - Declarations without a locked resolution are resolved during their first successful Sync.
-- A managed Artifact outside the final desired state causes a removal-required conflict before mutation.
+- A managed Artifact outside the final desired state causes a removal-required conflict before mutation unless targetless `tbboot install --prune` explicitly authorizes its safe removal.
 - Sync performs no partial apply when preflight detects any conflict.
 - Direct `file:` Source Identity is its Source Type plus its canonical locator. The published Source name is metadata, not consumer identity.
 - Relative `file:` locators are interpreted against the Operation Root and persisted in normalized root-relative form. Approved external locators are persisted in canonical absolute form.
@@ -168,9 +168,9 @@ Artifact-level declarations contribute one exact Artifact each. A source-level d
 
 New Artifacts later published by a pinned Source are not added during Sync. They require future upgrade behavior. Conversely, a declaration created by `--declare-only` has no pinned set yet, so its first successful Sync captures the Source contents resolved at that time.
 
-Lockfile Artifacts not justified by the final Manifest are outside desired state. If they have no managed output, a successful Sync prunes that derived stale lock state. Pruning is an effective change and produces `applied`, not `no_op`. If a corresponding managed Artifact exists, Sync reports removal required and preserves all state.
+Lockfile Artifacts not justified by the final Manifest are outside desired state. If they have no managed output, a successful Sync prunes that derived stale lock state. Pruning is an effective change and produces `applied`, not `no_op`. If a corresponding managed Artifact exists, Sync reports removal required and preserves all state unless targetless `tbboot install --prune` is set and every recorded file is unchanged.
 
-An empty but valid Manifest is a valid desired state. With no relevant Lockfile or Materialization Record entries it produces `no_op` with Artifact count zero. Stale lock-only state is pruned as `applied`; any Managed Artifact produces `removal_required`.
+An empty but valid Manifest is a valid desired state. With no relevant Lockfile or Materialization Record entries it produces `no_op` with Artifact count zero. Stale lock-only state is pruned as `applied`; any Managed Artifact produces `removal_required` unless safe targetless `--prune` is explicitly requested.
 
 When a desired Artifact has an existing Materialization Record, its recorded resolved Source version and Artifact version must match the locked resolution, and its canonical managed-path set must exactly match the desired file-step target set. A version or partial path-set mismatch is invalid persisted state with exit code `1`. A completely absent Artifact record instead follows the unowned-target rules during preflight.
 
@@ -211,7 +211,7 @@ An existing unowned target with different content is an ownership conflict and i
 
 A recorded managed file that is missing is Whole-File Drift. Sync does not recreate a manually removed managed file without later explicit user-action behavior.
 
-A Managed Artifact outside desired state always produces `removal_required`. Preflight also reports every detectable drift for that Artifact, including modified, missing, symlinked, or non-regular recorded paths, so later removal work receives the complete risk state.
+A Managed Artifact outside desired state produces `removal_required` unless safe targetless `--prune` is explicitly requested. Preflight always reports every detectable drift or unsafe topology for that Artifact, including modified, missing, symlinked, non-regular, or inaccessible recorded paths, so pruning never removes uncertain content.
 
 Resolution and preflight capture whole-file source bytes in memory. Application writes those captured bytes instead of reopening Source paths. Immediately before each write, application rechecks that the consumer target still has the state observed during preflight; a change aborts as drift. This closes Source and target time-of-check/time-of-use gaps without introducing a generic planner framework.
 
@@ -223,11 +223,11 @@ An Artifact descriptor must contain at least one Materialization Step. Phase 1 m
 
 A Source Descriptor must list at least one Artifact. An empty Source is a validation error and never produces an empty snapshot block.
 
-Preflight accumulates all detectable ownership, drift, and removal conflicts rather than stopping after the first. Any conflict prevents Manifest, Lockfile, Materialization Record, and consumer-file writes.
+Preflight accumulates all detectable ownership, drift, unsafe-topology, and removal conflicts rather than stopping after the first. Any conflict prevents Manifest, Lockfile, Materialization Record, and consumer-file writes.
 
 Accumulated conflicts are sorted by kind, normalized Source Identity, Artifact Name, and canonical path before result construction. Human and JSON output therefore remain stable across runs.
 
-After successful preflight, Sync materializes Artifacts in deterministic order and persists newly resolved Lockfile entries and the resulting Materialization Record. A no-op performs no persistence writes.
+After successful preflight, Sync materializes Artifacts in deterministic order, applies explicitly authorized safe removals in the same order, and persists newly resolved Lockfile entries and the resulting Materialization Record. A no-op performs no persistence writes.
 
 Operational failures during application retain the existing best-effort rollback behavior. Strong transactionality and verified recovery remain phase 3 work; phase 1 does not claim that arbitrary filesystem or persistence failures can never leave partial state.
 
@@ -240,7 +240,7 @@ Successful outcomes use exit code `0`:
 - `no_op` reports the reconciled Artifact count and omits the `changes` field;
 - `applied` reports the reconciled Artifact count and effective changes only, including lock pruning and ownership adoption when those are the only changes.
 
-Success details use one typed `changes` list with the minimum kinds `declaration_added`, `file_created`, `file_updated`, `ownership_adopted`, `resolution_locked`, and `lock_pruned`. Each entry includes Source and Artifact provenance plus a path when applicable. `resolution_locked` appears once per newly pinned declaration, with Artifact omitted for source scope. Unchanged files never appear in this list. Human output renders from the same effective-change model.
+Success details use one typed `changes` list with the minimum kinds `declaration_added`, `file_created`, `file_updated`, `file_removed`, `ownership_adopted`, `resolution_locked`, and `lock_pruned`. Each entry includes Source and Artifact provenance plus a path when applicable. `resolution_locked` appears once per newly pinned declaration, with Artifact omitted for source scope. Unchanged files never appear in this list. Human output renders from the same effective-change model.
 
 Failures use existing exit-code classes:
 
@@ -248,7 +248,7 @@ Failures use existing exit-code classes:
 - exit `2` for mixed-scope requests, ownership conflicts, drift, or removal-required outcomes;
 - exit `3` for Trust Policy denial.
 
-JSON retains `code`, `message`, `details`, and `warnings`. Sync details include the operation, overall outcome, Artifact count where known, effective changes on success, and typed conflicts on user-action failure. Each conflict identifies its kind and relevant Source, Artifact, and paths. When several user-action conflict kinds occur together, the overall outcome is `conflict`; individual entries retain `ownership`, `drift`, or `removal_required` kinds.
+JSON retains `code`, `message`, `details`, and `warnings`. Sync details include the operation, overall outcome, Artifact count where known, effective changes on success, and typed conflicts on user-action failure. Each conflict identifies its kind and relevant Source, Artifact, and paths. When several user-action conflict kinds occur together, the overall outcome is `conflict`; individual entries retain `ownership`, `drift`, `unsafe_topology`, or `removal_required` kinds.
 
 Human success output is one stable summary line followed only by effective changes. Human conflict output identifies the cause and relevant provenance. Planned changes are never reported as applied.
 
