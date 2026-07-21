@@ -453,8 +453,7 @@ func applyPrepared(root string, prepared preparedOperation, dryRun bool) (reposi
 	record := prepared.Record
 	changes := append([]Change(nil), prepared.Changes...)
 	var created []string
-	operations := append([]plannedFile(nil), prepared.Files...)
-	operations = append(operations, prepared.Removals...)
+	operations := slices.Concat(prepared.Files, prepared.Removals)
 	slices.SortFunc(operations, func(a, b plannedFile) int {
 		left := repositorystate.SourceIdentityKey(a.Artifact.Key.Source) + "\x00" + a.Artifact.Key.Name + "\x00" + a.Observed.Path + "\x00" + string(a.Change)
 		right := repositorystate.SourceIdentityKey(b.Artifact.Key.Source) + "\x00" + b.Artifact.Key.Name + "\x00" + b.Observed.Path + "\x00" + string(b.Change)
@@ -495,13 +494,9 @@ func applyPrepared(root string, prepared preparedOperation, dryRun bool) (reposi
 		record = repositorystate.UpsertManagedArtifact(record, managedRecordFor(d.Key.Source, source.ResolvedSource{Identity: source.Identity{Version: d.ResolvedVersion}}, d.Descriptor, files))
 	}
 	for key := range removedArtifacts {
-		values := make([]repositorystate.ManagedArtifactRecord, 0, len(record.Artifacts))
-		for _, artifact := range record.Artifacts {
-			if repositorystate.ManagedArtifactKey(artifact) != key {
-				values = append(values, artifact)
-			}
-		}
-		record = repositorystate.MaterializationRecord{Artifacts: values}
+		record.Artifacts = slices.DeleteFunc(slices.Clone(record.Artifacts), func(artifact repositorystate.ManagedArtifactRecord) bool {
+			return repositorystate.ManagedArtifactKey(artifact) == key
+		})
 	}
 	return record, changes, created, nil
 }
@@ -522,7 +517,7 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 			var changed materialize.ChangedSincePreflightError
 			if errors.As(err, &changed) {
 				conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
-				for _, file := range append(append([]plannedFile(nil), prepared.Files...), prepared.Removals...) {
+				for _, file := range slices.Concat(prepared.Files, prepared.Removals) {
 					if file.Observed.Path == changed.Path {
 						conflict.Source = file.Artifact.Key.Source
 						conflict.Artifact = file.Artifact.Key.Name
@@ -541,7 +536,7 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 		var changed materialize.ChangedSincePreflightError
 		if errors.As(err, &changed) {
 			conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
-			for _, file := range append(append([]plannedFile(nil), prepared.Files...), prepared.Removals...) {
+			for _, file := range slices.Concat(prepared.Files, prepared.Removals) {
 				if file.Observed.Path == changed.Path {
 					conflict.Source = file.Artifact.Key.Source
 					conflict.Artifact = file.Artifact.Key.Name

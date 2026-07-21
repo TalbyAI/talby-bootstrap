@@ -204,17 +204,7 @@ func Remove(observed Observation) error {
 	if err := revalidateRoot(root, observed); err != nil {
 		return err
 	}
-	path := filepath.FromSlash(observed.Path)
-	parent, base := filepath.Dir(path), filepath.Base(path)
-	dir, err := root.OpenRoot(parent)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ChangedSincePreflightError{Path: observed.Path}
-		}
-		return err
-	}
-	defer func() { _ = dir.Close() }()
-	if err := dir.Remove(base); err != nil {
+	if err := root.Remove(filepath.FromSlash(observed.Path)); err != nil {
 		if os.IsNotExist(err) {
 			return ChangedSincePreflightError{Path: observed.Path}
 		}
