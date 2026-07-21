@@ -2,9 +2,17 @@
 
 ## Project Structure & Module Organization
 
-This repository contains both Talby Bootstrap product documentation and the Go implementation of the `tbboot` CLI. Top-level files such as `CONTEXT.md`, `ARCHITECTURE.md`, and `UBIQUITOUS_LANGUAGE.md` hold core product language and decisions. Architecture decisions live in `docs/adr/`, design specs and plans live in `docs/superpowers/specs/` and `docs/superpowers/plans/`, and review and research artifacts live under `docs/reviews/` and `docs/research/`.
+This repository contains both Talby Bootstrap product documentation and the Go implementation of the `tbboot` CLI. Top-level files such as `CONTEXT.md`, `ARCHITECTURE.md`, and `UBIQUITOUS_LANGUAGE.md` have distinct canonical ownership described below. Architecture decisions live in `docs/adr/`; temporary design work may use `docs/superpowers/specs/` and `docs/superpowers/plans/`, but those files are working material rather than sources of truth. Review and research artifacts live under `docs/reviews/` and `docs/research/`.
 
 Go entrypoint code lives in `main.go`. CLI surface area lives in `cmd/tbboot/`. Reusable command-independent behavior belongs under `internal/`, grouped by domain such as `internal/install/`, `internal/source/`, and `internal/app/`.
+
+## Documentation lifecycle
+
+- Keep active product language in `CONTEXT.md`, the system overview in `ARCHITECTURE.md`, terminology in `UBIQUITOUS_LANGUAGE.md`, and durable architectural decisions in `docs/adr/`.
+- Treat `docs/superpowers/plans/` and `docs/superpowers/specs/` as temporary working material. Before removing them, extract any still-valid rule into the canonical document that owns it.
+- Do not use a plan or spec as the source of truth for implemented behavior. Update canonical documentation and search for obsolete claims when a contract changes.
+- Keep implementation-specific task order, function names, test names, review-thread notes, and commit instructions out of durable documentation unless they describe a reusable repository rule.
+- Keep fixture conventions beside their fixtures, such as in `testdata/examples/README.md`.
 
 ## Build, Test, and Development Commands
 
@@ -25,7 +33,7 @@ just check
 
 Markdown is the primary format. Use sentence-case headings, short sections, and repository terms from `CONTEXT.md` exactly, such as **Artifact**, **Source**, **Manifest**, **Lockfile**, and **Materialization Record**. Prefer concise prose over speculative implementation detail.
 
-ADR files use numbered names in `docs/adr/`, for example `0005-operation-output-logs-and-exit-codes.md`. New specs should use dated, descriptive names in `docs/superpowers/specs/`, matching the existing pattern.
+ADR files use numbered names in `docs/adr/`, for example `0005-operation-output-logs-and-exit-codes.md`. Temporary specs, when a session needs one, use dated, descriptive names in `docs/superpowers/specs/` and are removed after their durable decisions are extracted.
 
 Markdown linting is configured in `.markdownlint-cli2.yaml`; line length is intentionally disabled, and duplicate headings are allowed only across different sibling scopes.
 

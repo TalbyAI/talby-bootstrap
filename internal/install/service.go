@@ -17,10 +17,12 @@ type Request struct {
 	Artifact    string
 	DeclareOnly bool
 	DryRun      bool
+	Prune       bool
 }
 type SyncRequest struct {
 	Root   string
 	DryRun bool
+	Prune  bool
 }
 type Outcome string
 
@@ -37,6 +39,7 @@ const (
 	ChangeDeclarationAdded ChangeKind = "declaration_added"
 	ChangeFileCreated      ChangeKind = "file_created"
 	ChangeFileUpdated      ChangeKind = "file_updated"
+	ChangeFileRemoved      ChangeKind = "file_removed"
 	ChangeOwnershipAdopted ChangeKind = "ownership_adopted"
 	ChangeResolutionLocked ChangeKind = "resolution_locked"
 	ChangeLockPruned       ChangeKind = "lock_pruned"
@@ -60,6 +63,7 @@ const (
 	ConflictIntent          ConflictKind = "intent"
 	ConflictOwnership       ConflictKind = "ownership"
 	ConflictDrift           ConflictKind = "drift"
+	ConflictTopology        ConflictKind = "unsafe_topology"
 	ConflictRemovalRequired ConflictKind = "removal_required"
 )
 
@@ -119,6 +123,9 @@ func (service Service) Install(ctx context.Context, request Request) (result Res
 	}
 	if request.Source.Version != "" {
 		return Result{}, fmt.Errorf("requested source versions are not supported")
+	}
+	if request.Prune {
+		return Result{}, fmt.Errorf("prune requires targetless install")
 	}
 	operation, release, err := openOperationRoot(request.Root, request.DryRun)
 	if err != nil {

@@ -24,6 +24,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 	var artifact string
 	var declareOnly bool
 	var dryRun bool
+	var prune bool
 	service := installsvc.NewService(
 		source.NewStaticRegistry(map[string]source.Source{
 			"file": sourcefile.New(),
@@ -45,7 +46,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 				if err != nil {
 					return err
 				}
-				result, err := service.Sync(ctx, installsvc.SyncRequest{Root: root, DryRun: dryRun})
+				result, err := service.Sync(ctx, installsvc.SyncRequest{Root: root, DryRun: dryRun, Prune: prune})
 				if err != nil {
 					return err
 				}
@@ -53,6 +54,9 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 					return json.NewEncoder(stdout).Encode(resultEnvelope("sync succeeded", result))
 				}
 				return writeResult(stdout, result)
+			}
+			if prune {
+				return fmt.Errorf("prune requires targetless install")
 			}
 
 			ref, err := parseSourceRef(args[0])
@@ -88,6 +92,7 @@ func installCommand(ctx context.Context, opts *options, stdout io.Writer) *cobra
 	cmd.Flags().StringVar(&artifact, "artifact", "", "artifact to install")
 	cmd.Flags().BoolVar(&declareOnly, "declare-only", false, "declare artifact intent without materializing files")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report changes without writing files or state")
+	cmd.Flags().BoolVar(&prune, "prune", false, "remove unchanged files for artifacts absent from the complete desired state")
 	return cmd
 }
 

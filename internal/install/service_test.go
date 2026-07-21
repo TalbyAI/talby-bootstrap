@@ -96,6 +96,18 @@ func TestInstallPreservesOtherLockedAndManagedDeclarations(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsPruneForExplicitSource(t *testing.T) {
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+	_, err := service.Install(context.Background(), Request{
+		Root:   t.TempDir(),
+		Source: source.Ref{Type: "file", Locator: "./source"},
+		Prune:  true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "prune requires targetless install") {
+		t.Fatalf("Install() error = %v, want targetless prune validation", err)
+	}
+}
+
 func TestDeclareOnlyUnsupportedStepAcceptanceAndNoOpWithoutResolve(t *testing.T) {
 	root := t.TempDir()
 	service, impl := testService(testResolved(source.ArtifactDescriptor{Name: "a", Version: "1.0.0", Steps: []source.MaterializationStep{{Type: "prompt", TargetPath: "ignored"}}}))

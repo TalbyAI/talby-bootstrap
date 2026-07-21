@@ -21,6 +21,7 @@ type countingStore struct {
 	loadLockfileCalls int
 	loadRecordCalls   int
 	lockWrites        int
+	recordWrites      int
 }
 
 func (s *countingStore) LoadManifest(ctx context.Context, root string) (repositorystate.Manifest, error) {
@@ -41,6 +42,11 @@ func (s *countingStore) LoadMaterializationRecord(ctx context.Context, root stri
 func (s *countingStore) WriteLockfile(ctx context.Context, root string, lock repositorystate.Lockfile) error {
 	s.lockWrites++
 	return s.Store.WriteLockfile(ctx, root, lock)
+}
+
+func (s *countingStore) WriteMaterializationRecord(ctx context.Context, root string, record repositorystate.MaterializationRecord) error {
+	s.recordWrites++
+	return s.Store.WriteMaterializationRecord(ctx, root, record)
 }
 
 func syncManifest(t *testing.T, root string, declarations ...repositorystate.Declaration) {
@@ -382,6 +388,122 @@ func TestSyncAggregatesOwnershipDriftAndRemovalWithoutWrites(t *testing.T) {
 	}
 }
 
+func TestSyncAggregatesInaccessibleManagedPath(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	syncManifest(t, root)
+
+	target := filepath.Join(root, "a")
+	t.Cleanup(func() {
+		if err := os.Chmod(target, 0o644); err != nil {
+			t.Errorf("restore target permissions: %v", err)
+		}
+	})
+	if err := os.Chmod(target, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(target); err == nil {
+		t.Skip("runner bypasses file permissions")
+	}
+
+	_, err := service.Sync(context.Background(), SyncRequest{Root: root})
+	var conflict UserActionError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("Sync() error = %T %v, want user-action conflict", err, err)
+	}
+	if !hasConflict(conflict.Result, ConflictRemovalRequired) || !hasConflict(conflict.Result, ConflictTopology) {
+		t.Fatalf("conflicts = %#v, want removal-required and topology", conflict.Result.Conflicts)
+	}
+}
+
+func TestSyncPruneRemovesUnchangedManagedArtifact(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	syncManifest(t, root)
+
+	result, err := service.Sync(context.Background(), SyncRequest{Root: root, Prune: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != OutcomeApplied || !hasChange(result, ChangeFileRemoved) || !hasChange(result, ChangeLockPruned) {
+		t.Fatalf("Sync() = %#v, want applied removal", result)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a")); !os.IsNotExist(err) {
+		t.Fatalf("removed target stat = %v, want not exist", err)
+	}
+	lock, err := repositorystate.NewStore().LoadLockfile(context.Background(), root)
+	if err != nil || len(lock.Resolutions) != 0 {
+		t.Fatalf("lockfile = %#v, %v, want empty", lock, err)
+	}
+	record, err := repositorystate.NewStore().LoadMaterializationRecord(context.Background(), root)
+	if err != nil || len(record.Artifacts) != 0 {
+		t.Fatalf("materialization record = %#v, %v, want empty", record, err)
+	}
+}
+
+func TestSyncPruneBlocksOnDriftWithoutWrites(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	syncManifest(t, root)
+	if err := os.WriteFile(filepath.Join(root, "a"), []byte("edited"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := map[string][]byte{}
+	for _, name := range []string{repositorystate.ManifestFileName, repositorystate.LockfileFileName, repositorystate.MaterializationRecordFileName, "a"} {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[name] = data
+	}
+
+	_, err := service.Sync(context.Background(), SyncRequest{Root: root, Prune: true})
+	var conflict UserActionError
+	if !errors.As(err, &conflict) || !hasConflict(conflict.Result, ConflictDrift) {
+		t.Fatalf("Sync() error = %T %v, want drift conflict", err, err)
+	}
+	for name, want := range before {
+		got, readErr := os.ReadFile(filepath.Join(root, name))
+		if readErr != nil || !bytes.Equal(got, want) {
+			t.Fatalf("%s after conflicted prune = %q, %v; want unchanged", name, got, readErr)
+		}
+	}
+}
+
+func TestSyncPruneDryRunPlansRemovalWithoutWrites(t *testing.T) {
+	root := t.TempDir()
+	syncManifest(t, root, artifactDeclaration("a"))
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+	if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	syncManifest(t, root)
+	before, err := os.ReadFile(filepath.Join(root, "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.Sync(context.Background(), SyncRequest{Root: root, Prune: true, DryRun: true})
+	if err != nil || result.Outcome != OutcomePlanned || !hasChange(result, ChangeFileRemoved) {
+		t.Fatalf("Sync() = %#v, %v, want planned removal", result, err)
+	}
+	if after, err := os.ReadFile(filepath.Join(root, "a")); err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("target after dry-run prune = %q, %v; want unchanged", after, err)
+	}
+}
+
 func hasConflict(result Result, kind ConflictKind) bool {
 	for _, conflict := range result.Conflicts {
 		if conflict.Kind == kind {
@@ -400,6 +522,25 @@ func TestSyncRejectsReservedAndActiveSourceInputTargets(t *testing.T) {
 		if _, err := service.Sync(context.Background(), SyncRequest{Root: root}); err == nil {
 			t.Fatalf("Sync(%q) error = nil", target)
 		}
+	}
+}
+
+func TestSyncAggregatesUnsafeTopologyAsConflict(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "nested")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	syncManifest(t, root, artifactDeclaration("a"), artifactDeclaration("b"))
+	service, _ := testService(testResolved(testArtifact("a", "nested/a"), testArtifact("b", "b")))
+
+	_, err := service.Sync(context.Background(), SyncRequest{Root: root})
+	var conflict UserActionError
+	if !errors.As(err, &conflict) || !hasConflict(conflict.Result, ConflictTopology) {
+		t.Fatalf("Sync() error = %T %v, want unsafe-topology conflict", err, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "b")); !os.IsNotExist(err) {
+		t.Fatalf("unrelated target stat = %v, want no writes", err)
 	}
 }
 func TestPreflightRejectsTargetOverlappingAnotherSourceInput(t *testing.T) {
@@ -495,6 +636,51 @@ func TestSyncRevalidatesAdoptedFileBeforePersistence(t *testing.T) {
 		t.Fatalf("revalidateAdoptions() error = %T %v", err, err)
 	}
 }
+
+func TestPersistPreparedRevalidatesAdoptionAfterApply(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "target"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	adopted, err := materialize.Observe(root, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdArtifact := desiredArtifact{
+		Key:             repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, Name: "created"},
+		Resolution:      repositorystate.ArtifactResolution{Name: "created", Version: "1.0.0"},
+		ResolvedVersion: testSnapshotVersion,
+		Descriptor:      testArtifact("created", "target"),
+	}
+	createdArtifact.Descriptor.Steps[0].SourceBytes = []byte("new")
+	adoptedArtifact := desiredArtifact{
+		Key:             repositorystate.ArtifactKey{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, Name: "adopted"},
+		Resolution:      repositorystate.ArtifactResolution{Name: "adopted", Version: "1.0.0"},
+		ResolvedVersion: testSnapshotVersion,
+		Descriptor:      testArtifact("adopted", "target"),
+	}
+	prepared := preparedOperation{
+		Desired: []desiredArtifact{createdArtifact},
+		Files: []plannedFile{
+			{Artifact: adoptedArtifact, Step: adoptedArtifact.Descriptor.Steps[0], Observed: adopted, Digest: materialize.Digest([]byte("old")), Change: ChangeOwnershipAdopted},
+			{Artifact: createdArtifact, Step: createdArtifact.Descriptor.Steps[0], Observed: adopted, Digest: materialize.Digest([]byte("new")), Change: ChangeFileCreated},
+		},
+	}
+	store := &countingStore{Store: repositorystate.NewStore()}
+
+	_, err = (Service{store: store}).persistPrepared(context.Background(), root, "sync", prepared, nil, false)
+	var conflict UserActionError
+	if !errors.As(err, &conflict) || len(conflict.Result.Conflicts) != 1 || conflict.Result.Conflicts[0].Kind != ConflictDrift {
+		t.Fatalf("persistPrepared() error = %T %v, want adoption drift", err, err)
+	}
+	if store.recordWrites != 0 {
+		t.Fatalf("WriteMaterializationRecord calls = %d, want 0", store.recordWrites)
+	}
+	if _, err := os.Stat(filepath.Join(root, repositorystate.MaterializationRecordFileName)); !os.IsNotExist(err) {
+		t.Fatalf("materialization record after drift = %v, want absent", err)
+	}
+}
+
 func TestPersistPreparedClassifiesWriteRaceAsDrift(t *testing.T) {
 	root := t.TempDir()
 	observed, err := materialize.Observe(root, "target")
