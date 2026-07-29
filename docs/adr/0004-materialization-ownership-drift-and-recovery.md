@@ -18,11 +18,15 @@ Mutating operations use one canonical Operation Root and an exclusive root-scope
 
 Whole-file replacement uses a same-directory temporary file followed by atomic rename. Existing file permission bits are preserved and new files use `0644`. Dry Run performs the same read, resolve, and preflight work without acquiring the mutation lock or writing state or target files; it reports planned changes and never clears Recovery State.
 
-**Recovery State** has a strict schema-version-1 persistence format at `tbboot-artifacts.recovery.yaml`. It stores only a fixed error code, sanitized summary, canonical root-relative observations, expected state, safe digests, modes, and optional ownership metadata. It never stores raw errors or prior contents. Runtime rollback, recovery blocking, durable backup, crash-recoverable lock takeover, and the full rollback lifecycle are deferred to later tickets. Targetless `tbboot install --prune` removes only unchanged managed whole files after complete preflight.
+**Recovery State** has a strict schema-version-1 persistence format at `tbboot-artifacts.recovery.yaml`. It stores only a fixed error code, sanitized summary, canonical root-relative observations, expected state, safe digests, modes, and optional ownership metadata. It never stores raw errors or prior contents. Targetless `tbboot install --prune` removes only unchanged managed whole files after complete preflight.
+
+Each non-Dry Run operation journals prior target state in memory immediately before every materialization or repository-state mutation. Controlled mutation failure rolls entries back in reverse order, attempts and re-observes every restoration, verifies prior bytes, permission bits, absence, and created-directory cleanup, and records sanitized Recovery State when final state remains unverified. Verified final state counts as restored even when the restoration action reported an error. Recovery State itself is accepted as recorded only after rooted observation confirms a regular file with mode `0600`, strict reload reproduces the intended values, and revalidation detects no change during verification.
+
+Later Install and Sync operations inspect Recovery State before normal state loading or Source resolution. Mismatches and changes during the current inspect/revalidate window are user-action conflicts; Recovery State does not claim to detect safe parent-directory replacement between processes because it stores no directory identities. Matching non-Dry Run operations clear and verify its absence, while Dry Run never clears it. Clear failures remain sanitized operational errors. Human output reports only the fixed recovery code and canonical paths; JSON uses a private command DTO with nested `expected` data; neither output emits the persisted summary. Durable backups, process-crash recovery, and crash-recoverable lock takeover remain deferred.
 
 ## Consequences
 
 - User edits are not overwritten silently when they create drift or ownership conflicts.
 - Managed changes can be traced to their artifact, source, source version, and owned paths.
-- 0.1 does not promise transactional filesystem behavior that the current implementation does not provide.
-- The persisted Recovery State contract can evolve independently from the later rollback lifecycle.
+- Controlled in-process failures receive verified best-effort rollback without promising process-crash recovery.
+- Unverified restoration becomes explicit, sanitized Recovery State that blocks later work until repaired.

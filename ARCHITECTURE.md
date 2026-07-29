@@ -26,6 +26,10 @@ The six persisted YAML documents use integer `schema_version: 1`, strict readers
 
 Mutating operations resolve one canonical Operation Root, acquire an exclusive root-scoped operation lock before reading state or resolving sources, and revalidate root, parent, source, and target identity before writes. Source and target paths must remain confined to their allowed roots and must reject symlinks, reparse points, special files, unsafe topology, and identity-changing races. File replacement uses a same-directory temporary file and atomic rename; existing modes are preserved and new files use `0644`.
 
+Each non-Dry Run Install or Sync operation records prior bytes, permission bits, absence, and parent topology in an in-memory mutation journal immediately before every materialization or repository-state mutation. Controlled failures roll journal entries back in reverse order, attempt every restoration, remove operation-created directories, and re-observe each target. Verified final state determines rollback success even when a restoration action reported an error.
+
+When rollback remains unverified, the operation writes sanitized Recovery State. The write is accepted only after rooted observation confirms a regular file with mode `0600`, strict reload reproduces the intended value, and topology revalidation detects no change. Later Install and Sync operations inspect Recovery State before normal state loading or Source resolution; mismatches block as user-action conflicts, matching non-Dry Run operations clear and verify its absence, and Dry Run never clears it.
+
 Dry Run follows the same read, resolve, and preflight path without acquiring the mutation lock or writing Manifest, Lockfile, Materialization Record, Recovery State, or target files. Planned changes are reported as `planned`; unchanged operations remain `no_op`.
 
 ## Decision index
@@ -49,5 +53,5 @@ Dry Run follows the same read, resolve, and preflight path without acquiring the
 - Git acquisition and other Source Types.
 - Catalog browsing, search, upgrade, and catalog maintenance commands.
 - Fragment, template, script, and prompt materialization.
-- Crash-recoverable operation locks, durable backups, and the full rollback lifecycle.
+- Crash-recoverable operation locks, durable backups, and process-crash recovery.
 - Rich version constraints, source/materialization caches, and persisted operation logs.
