@@ -186,13 +186,82 @@ func Revalidate(observed Observation) error {
 	current, err := Observe(observed.Root, observed.Path)
 	return validateObservation(observed, current, err)
 }
+
+func ReadPrior(observed Observation) ([]byte, error) {
+	if observed.Kind == EntryAbsent {
+		return nil, nil
+	}
+	if observed.Kind != EntryRegular {
+		return nil, fmt.Errorf("target %q must be a regular file or absent", observed.Path)
+	}
+	root, err := os.OpenRoot(observed.Root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	if err := revalidateRoot(root, observed); err != nil {
+		return nil, err
+	}
+	data, err := root.ReadFile(filepath.FromSlash(observed.Path))
+	if err != nil {
+		return nil, err
+	}
+	if Digest(data) != observed.Digest {
+		return nil, ChangedSincePreflightError{Path: observed.Path}
+	}
+	if err := revalidateRoot(root, observed); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func Write(observed Observation, content []byte) error {
 	root, err := os.OpenRoot(observed.Root)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	return writeRooted(root, observed, content)
+	mode := os.FileMode(0o644)
+	if observed.Kind == EntryRegular {
+		mode = observed.Mode.Perm()
+	}
+	return writeRooted(root, observed, content, mode)
+}
+
+func Restore(observed Observation, content []byte, mode os.FileMode) error {
+	root, err := os.OpenRoot(observed.Root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return writeRooted(root, observed, content, mode.Perm())
+}
+
+func MatchesPrior(prior, current Observation) bool {
+	return prior.Root == current.Root && prior.Path == current.Path &&
+		sameFileIdentity(prior.rootInfo, current.rootInfo) &&
+		sameParentObservations(prior.parents, current.parents) &&
+		prior.Kind == current.Kind && prior.Digest == current.Digest &&
+		prior.Mode.Perm() == current.Mode.Perm()
+}
+
+func MissingParents(observed Observation) []string {
+	existing := make(map[string]struct{}, len(observed.parents))
+	for _, parent := range observed.parents {
+		existing[PathKey(parent.Path)] = struct{}{}
+	}
+	var missing []string
+	path := ""
+	for _, component := range strings.Split(filepath.Dir(filepath.FromSlash(observed.Path)), string(filepath.Separator)) {
+		if component == "." {
+			continue
+		}
+		path = filepath.Join(path, component)
+		if _, ok := existing[PathKey(path)]; !ok {
+			missing = append(missing, filepath.ToSlash(path))
+		}
+	}
+	return missing
 }
 
 func Remove(observed Observation) error {
@@ -212,7 +281,7 @@ func Remove(observed Observation) error {
 	}
 	return nil
 }
-func writeRooted(root *os.Root, observed Observation, content []byte) error {
+func writeRooted(root *os.Root, observed Observation, content []byte, mode os.FileMode) error {
 	if err := revalidateRoot(root, observed); err != nil {
 		return err
 	}
@@ -237,10 +306,6 @@ func writeRooted(root *os.Root, observed Observation, content []byte) error {
 			return err
 		}
 		return io.ErrShortWrite
-	}
-	mode := os.FileMode(0644)
-	if observed.Kind == EntryRegular {
-		mode = observed.Mode.Perm()
 	}
 	if err := file.Chmod(mode); err != nil {
 		_ = file.Close()

@@ -4,9 +4,78 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestReadPriorRestoreAndMatchesPrior(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nested", "file")
+	if err := os.Mkdir(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("before"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	prior, err := Observe(root, "nested/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes, err := ReadPrior(prior)
+	if err != nil || string(bytes) != "before" {
+		t.Fatalf("ReadPrior() = %q, %v", bytes, err)
+	}
+	if err := Write(prior, []byte("after")); err != nil {
+		t.Fatal(err)
+	}
+	current, err := Observe(root, "nested/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Restore(current, bytes, prior.Mode.Perm()); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Observe(root, "nested/file")
+	if err != nil || !MatchesPrior(prior, restored) {
+		t.Fatalf("restored = %#v, %v", restored, err)
+	}
+}
+
+func TestMissingParentsReturnsShallowToDeepCanonicalPaths(t *testing.T) {
+	observed, err := Observe(t.TempDir(), "a/b/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := MissingParents(observed), []string{"a", "a/b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("MissingParents() = %#v, want %#v", got, want)
+	}
+}
+
+func TestReadPriorHandlesAbsentAndRejectsChangedTarget(t *testing.T) {
+	root := t.TempDir()
+	absent, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := ReadPrior(absent); err != nil || data != nil {
+		t.Fatalf("ReadPrior(absent) = %q, %v", data, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file"), []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prior, err := Observe(root, "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file"), []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var changed ChangedSincePreflightError
+	if _, err := ReadPrior(prior); !errors.As(err, &changed) {
+		t.Fatalf("ReadPrior(changed) error = %T %v", err, err)
+	}
+}
 
 func TestObserveCanonicalizesAbsentAndRegularTargets(t *testing.T) {
 	root := t.TempDir()
@@ -214,7 +283,7 @@ func TestWriteRootedStaysWithOpenedOperationRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeRooted(opened, observed, []byte("content")); err != nil {
+	if err := writeRooted(opened, observed, []byte("content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(filepath.Join(moved, "target")); err != nil || string(got) != "content" {
