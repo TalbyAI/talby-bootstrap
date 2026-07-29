@@ -104,8 +104,9 @@ func (e TrustPolicyError) Error() string {
 }
 
 type Service struct {
-	registry source.Registry
-	store    repositorystate.Store
+	registry     source.Registry
+	store        repositorystate.Store
+	mutationHook mutationHook
 }
 
 func NewService(registry source.Registry, store repositorystate.Store) Service {
@@ -201,8 +202,12 @@ func (service Service) Install(ctx context.Context, request Request) (result Res
 		if err := operation.validate(); err != nil {
 			return Result{}, err
 		}
-		if err := service.store.WriteManifest(ctx, request.Root, next); err != nil {
-			return Result{}, err
+		tx := &transaction{root: request.Root, store: service.store, hook: service.mutationHook}
+		if err := tx.apply(mutationWrite, repositorystate.ManifestFileName, nil, func() error {
+			return service.store.WriteManifest(ctx, request.Root, next)
+		}); err != nil {
+			failed, _ := tx.fail(err)
+			return Result{}, failed
 		}
 		return Result{Operation: "install", Outcome: OutcomeApplied, ArtifactCount: len(selected), Changes: []Change{{Kind: ChangeDeclarationAdded, Source: identity, Artifact: request.Artifact}}}, nil
 	}
