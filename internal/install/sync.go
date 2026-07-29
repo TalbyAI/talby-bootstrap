@@ -56,6 +56,9 @@ func (service Service) Sync(ctx context.Context, request SyncRequest) (result Re
 	if err := operation.validate(); err != nil {
 		return Result{}, err
 	}
+	if err := service.inspectRecovery(ctx, operation, request.DryRun); err != nil {
+		return Result{}, err
+	}
 	manifest, err := service.store.LoadManifest(ctx, request.Root)
 	if err != nil {
 		return Result{}, err

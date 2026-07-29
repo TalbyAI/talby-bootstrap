@@ -15,10 +15,11 @@ import (
 type mutationKind string
 
 const (
-	mutationWrite    mutationKind = "write"
-	mutationRemove   mutationKind = "remove"
-	mutationRestore  mutationKind = "restore"
-	mutationRecovery mutationKind = "recovery_write"
+	mutationWrite         mutationKind = "write"
+	mutationRemove        mutationKind = "remove"
+	mutationRestore       mutationKind = "restore"
+	mutationRecovery      mutationKind = "recovery_write"
+	mutationRecoveryClear mutationKind = "recovery_clear"
 )
 
 const recoverySummary = "rollback could not restore every path"

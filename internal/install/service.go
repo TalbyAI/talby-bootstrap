@@ -143,6 +143,9 @@ func (service Service) Install(ctx context.Context, request Request) (result Res
 	if err := operation.validate(); err != nil {
 		return Result{}, err
 	}
+	if err := service.inspectRecovery(ctx, operation, request.DryRun); err != nil {
+		return Result{}, err
+	}
 	identity, err := repositorystate.NormalizeSourceIdentity(request.Root, repositorystate.SourceIdentity{Type: request.Source.Type, Locator: request.Source.Locator})
 	if err != nil {
 		return Result{}, err
