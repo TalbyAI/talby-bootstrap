@@ -119,6 +119,29 @@ func TestStoreRoundTripsRecoveryState(t *testing.T) {
 	}
 }
 
+func TestStoreRemovesRecoveryState(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore()
+	state := RecoveryState{Code: RecoveryCodeRollbackIncomplete, Summary: "rollback incomplete", Observations: []RecoveryObservation{{Path: "file", Result: RecoveryResultRestoreFailed, ExpectedState: RecoveryExpectedAbsent}}}
+	if err := store.WriteRecoveryState(context.Background(), root, state); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveRecoveryState(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadRecoveryState(context.Background(), root); !stateFileNotFoundForTest(err, StateFileRecovery) {
+		t.Fatalf("LoadRecoveryState() error = %v, want typed not-found", err)
+	}
+	if err := store.RemoveRecoveryState(context.Background(), root); err == nil {
+		t.Fatal("second RemoveRecoveryState() error = nil")
+	}
+}
+
+func stateFileNotFoundForTest(err error, file StateFile) bool {
+	var state StateFileError
+	return errors.As(err, &state) && state.File == file && state.Kind == StateFileErrorNotFound
+}
+
 func TestStoreRejectsInvalidStateFiles(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore()
