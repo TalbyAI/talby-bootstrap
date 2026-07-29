@@ -29,6 +29,7 @@ type Store interface {
 	WriteMaterializationRecord(context.Context, string, MaterializationRecord) error
 	LoadRecoveryState(context.Context, string) (RecoveryState, error)
 	WriteRecoveryState(context.Context, string, RecoveryState) error
+	RemoveRecoveryState(context.Context, string) error
 }
 
 type fileStore struct{}
@@ -417,6 +418,10 @@ func (fileStore) WriteRecoveryState(_ context.Context, root string, state Recove
 		return err
 	}
 	return writeFileAtomically(filepath.Join(root, RecoveryStateFileName), bytes, 0o600)
+}
+
+func (fileStore) RemoveRecoveryState(_ context.Context, root string) error {
+	return os.Remove(filepath.Join(root, RecoveryStateFileName))
 }
 
 func writeFileAtomically(path string, data []byte, mode os.FileMode) error {

@@ -8,7 +8,9 @@ The 0.1 release is the active contract in this document. It has one implemented 
 
 All six YAML documents use `schema_version: 1`, strict readers, deterministic writers, and these canonical filenames: `tbboot-source.yaml`, `tbboot-artifact.yaml`, `tbboot-artifacts.yaml`, `tbboot-artifacts.lock.yaml`, `tbboot-artifacts.managed.yaml`, and `tbboot-artifacts.recovery.yaml`. Persisted Source References are scalar `file:<locator>` or `git:<locator>` values; Git identities are stored and validated but not acquired in 0.1. There is no migration from earlier filenames or structured source objects.
 
-Catalog, search, upgrade, Git acquisition, fragment/template/script/prompt steps, full rollback lifecycle, and persisted operation logs are deferred. The deferred design archive below is retained as context only and does not describe implemented 0.1 behavior.
+Controlled in-process mutation failures trigger reverse-order, verified best-effort rollback from in-memory prior-state captures. When restoration cannot be verified and the acquired **Operation Root** identity remains available, `tbboot` writes sanitized **Recovery State** and later Install or Sync operations block until its observations match repaired filesystem state. Losing that root identity stops rollback and Recovery State persistence without touching a replacement directory and returns operational **Exit Code** `1`. A matching non-Dry Run clears Recovery State before normal state loading and Source resolution; Dry Run inspects but never clears it.
+
+Catalog, search, upgrade, Git acquisition, fragment/template/script/prompt steps, durable backups, process-crash recovery, crash-recoverable lock takeover, and persisted operation logs are deferred. The deferred design archive below is retained as context only and does not describe implemented 0.1 behavior.
 
 ## Language
 
@@ -261,7 +263,7 @@ The explicit conflict state where two **Managed Artifacts** would claim the same
 _Avoid_: Shared ownership, last-write-wins
 
 **Recovery State**:
-The explicit failure state recorded atomically when verified best-effort rollback cannot restore every affected path to its prior observed state. **Dry Run** may report it but never clears it.
+The explicit failure state recorded atomically when verified best-effort rollback cannot restore every affected path to its prior observed state and the acquired **Operation Root** identity remains available. **Dry Run** may report it but never clears it.
 _Avoid_: Silent partial failure, implicit dirty state
 
 **Recovery State Filename**:
@@ -355,10 +357,13 @@ _Avoid_: Expected update, normal sync
 - A **Materialization Record** tracks whole files in 0.1; **Fragments** are deferred
 - A managed change is reported to the user with a **Provenance Summary**
 - An **Ownership Conflict** exists when two **Managed Artifacts** would claim the same whole file; fragment overlap is deferred
-- **Recovery State** has a persisted schema contract; runtime creation and rollback lifecycle are deferred
+- Controlled in-process mutation failures trigger reverse-order, verified best-effort rollback from in-memory prior-state captures
+- Unverified restoration writes sanitized **Recovery State** while the acquired **Operation Root** identity remains available and blocks later Install or Sync operations until its observations match repaired filesystem state
+- Losing the acquired **Operation Root** identity stops rollback and **Recovery State** persistence without touching a replacement directory and returns operational **Exit Code** `1`
 - **Recovery State** has exactly one canonical **Recovery State Filename**
 - **Recovery State** stores canonical root-relative paths and sanitized failure metadata, not prior file contents or raw errors
-- Recovery blocking and manual-repair verification are deferred beyond 0.1
+- Matching non-Dry Run operations clear **Recovery State** before normal state loading and Source resolution; **Dry Run** inspects but never clears it
+- Durable backups, process-crash recovery, and crash-recoverable lock takeover are deferred beyond 0.1
 - Fragment boundaries and **Fragment Drift** are deferred beyond 0.1
 - **Whole-File Drift** is detected by comparing the current whole-file contents against the prior **Materialization Record**
 - **Whole-File Drift** is accumulated during preflight and blocks the entire mutation with a user-action conflict

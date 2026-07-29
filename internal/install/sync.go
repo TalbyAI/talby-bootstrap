@@ -56,6 +56,9 @@ func (service Service) Sync(ctx context.Context, request SyncRequest) (result Re
 	if err := operation.validate(); err != nil {
 		return Result{}, err
 	}
+	if err := service.inspectRecovery(ctx, operation, request.DryRun); err != nil {
+		return Result{}, err
+	}
 	manifest, err := service.store.LoadManifest(ctx, request.Root)
 	if err != nil {
 		return Result{}, err
@@ -454,10 +457,9 @@ func prepareSyncUndesired(root string, desired []desiredArtifact, lock repositor
 	}
 	return next, removals, changes, conflicts, nil
 }
-func applyPrepared(root string, prepared preparedOperation, dryRun bool) (repositorystate.MaterializationRecord, []Change, []string, error) {
+func applyPrepared(tx *transaction, prepared preparedOperation, dryRun bool) (repositorystate.MaterializationRecord, []Change, error) {
 	record := prepared.Record
 	changes := append([]Change(nil), prepared.Changes...)
-	var created []string
 	operations := slices.Concat(prepared.Files, prepared.Removals)
 	slices.SortFunc(operations, func(a, b plannedFile) int {
 		left := repositorystate.SourceIdentityKey(a.Artifact.Key.Source) + "\x00" + a.Artifact.Key.Name + "\x00" + a.Observed.Path + "\x00" + string(a.Change)
@@ -468,18 +470,20 @@ func applyPrepared(root string, prepared preparedOperation, dryRun bool) (reposi
 	removedArtifacts := map[repositorystate.ArtifactKey]struct{}{}
 	for _, file := range operations {
 		if !dryRun {
+			owner := &repositorystate.RecoveryOwner{Source: file.Artifact.Key.Source, ResolvedVersion: file.Artifact.ResolvedVersion, Artifact: file.Artifact.Key.Name}
 			var err error
 			switch file.Change {
 			case ChangeFileCreated, ChangeFileUpdated:
-				err = materialize.Write(file.Observed, file.Step.SourceBytes)
+				err = tx.apply(mutationWrite, file.Observed.Path, owner, func() error {
+					return materialize.Write(file.Observed, file.Step.SourceBytes)
+				})
 			case ChangeFileRemoved:
-				err = materialize.Remove(file.Observed)
+				err = tx.apply(mutationRemove, file.Observed.Path, owner, func() error {
+					return materialize.Remove(file.Observed)
+				})
 			}
 			if err != nil {
-				return record, nil, created, err
-			}
-			if file.Change == ChangeFileCreated {
-				created = append(created, file.Observed.AbsolutePath)
+				return record, nil, err
 			}
 		}
 		if file.Change == ChangeFileRemoved {
@@ -503,7 +507,7 @@ func applyPrepared(root string, prepared preparedOperation, dryRun bool) (reposi
 			return repositorystate.ManagedArtifactKey(artifact) == key
 		})
 	}
-	return record, changes, created, nil
+	return record, changes, nil
 }
 func revalidateAdoptions(files []plannedFile) error {
 	for _, file := range files {
@@ -517,11 +521,27 @@ func revalidateAdoptions(files []plannedFile) error {
 	return nil
 }
 func (service Service) persistPrepared(ctx context.Context, root, operation string, prepared preparedOperation, manifest *repositorystate.Manifest, dryRun bool, expectedRoot ...operationRoot) (Result, error) {
-	record, changes, created, err := applyPrepared(root, prepared, dryRun)
+	var tx *transaction
+	if !dryRun {
+		tx = &transaction{root: root, store: service.store, hook: service.mutationHook}
+		if len(expectedRoot) > 0 {
+			tx.rootInfo = expectedRoot[0].info
+		} else {
+			info, err := os.Stat(root)
+			if err != nil {
+				return Result{}, err
+			}
+			tx.rootInfo = info
+		}
+	}
+	record, changes, err := applyPrepared(tx, prepared, dryRun)
 	if err != nil {
-		cleanup(created)
+		failed, recoveryCreated := tx.fail(err)
+		if recoveryCreated || failed != err {
+			return Result{}, failed
+		}
 		var changed materialize.ChangedSincePreflightError
-		if errors.As(err, &changed) {
+		if errors.As(failed, &changed) {
 			conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
 			for _, file := range slices.Concat(prepared.Files, prepared.Removals) {
 				if file.Observed.Path == changed.Path {
@@ -533,13 +553,16 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 			result := resultForConflicts(operation, len(prepared.Desired), []Conflict{conflict}, dryRun)
 			return result, UserActionError{Result: result}
 		}
-		return Result{}, err
+		return Result{}, failed
 	}
 	if !dryRun {
 		if err := revalidateAdoptions(prepared.Files); err != nil {
-			cleanup(created)
+			failed, recoveryCreated := tx.fail(err)
+			if recoveryCreated || failed != err {
+				return Result{}, failed
+			}
 			var changed materialize.ChangedSincePreflightError
-			if errors.As(err, &changed) {
+			if errors.As(failed, &changed) {
 				conflict := Conflict{Kind: ConflictDrift, Paths: []string{changed.Path}}
 				for _, file := range slices.Concat(prepared.Files, prepared.Removals) {
 					if file.Observed.Path == changed.Path {
@@ -551,7 +574,7 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 				result := resultForConflicts(operation, len(prepared.Desired), []Conflict{conflict}, false)
 				return result, UserActionError{Result: result}
 			}
-			return Result{}, err
+			return Result{}, failed
 		}
 	}
 	if dryRun {
@@ -562,6 +585,10 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 	}
 	if len(expectedRoot) > 0 {
 		if err := expectedRoot[0].validate(); err != nil {
+			failed, recoveryCreated := tx.fail(err)
+			if recoveryCreated || failed != err {
+				return Result{}, failed
+			}
 			result := resultForConflicts(operation, len(prepared.Desired), []Conflict{{Kind: ConflictDrift, Paths: []string{"."}}}, false)
 			return result, UserActionError{Result: result}
 		}
@@ -580,29 +607,30 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 		}
 	}
 	if lockChanged {
-		if err := service.store.WriteLockfile(ctx, root, prepared.Lockfile); err != nil {
-			cleanup(created)
-			return Result{}, err
+		if err := tx.apply(mutationWrite, repositorystate.LockfileFileName, nil, func() error {
+			return service.store.WriteLockfile(ctx, root, prepared.Lockfile)
+		}); err != nil {
+			failed, _ := tx.fail(err)
+			return Result{}, failed
 		}
 	}
 	if recordChanged {
-		if err := service.store.WriteMaterializationRecord(ctx, root, record); err != nil {
-			cleanup(created)
-			return Result{}, err
+		if err := tx.apply(mutationWrite, repositorystate.MaterializationRecordFileName, nil, func() error {
+			return service.store.WriteMaterializationRecord(ctx, root, record)
+		}); err != nil {
+			failed, _ := tx.fail(err)
+			return Result{}, failed
 		}
 	}
 	if manifest != nil {
-		if err := service.store.WriteManifest(ctx, root, *manifest); err != nil {
-			cleanup(created)
-			return Result{}, err
+		if err := tx.apply(mutationWrite, repositorystate.ManifestFileName, nil, func() error {
+			return service.store.WriteManifest(ctx, root, *manifest)
+		}); err != nil {
+			failed, _ := tx.fail(err)
+			return Result{}, failed
 		}
 	}
 	return Result{Operation: operation, Outcome: OutcomeApplied, ArtifactCount: len(prepared.Desired), Changes: changes}, nil
-}
-func cleanup(paths []string) {
-	for _, path := range paths {
-		_ = os.Remove(path)
-	}
 }
 func sortConflicts(values []Conflict) {
 	slices.SortFunc(values, func(a, b Conflict) int {

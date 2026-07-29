@@ -53,7 +53,7 @@ In 0.1, the active materialization step type is whole-file `file`, and the CLI s
   Avoid: Garbage collection, overwrite policy
 - **Ownership Conflict**: A conflict where two **Managed Artifacts** claim the same whole file or overlapping fragment region.
   Avoid: Shared ownership, last-write-wins
-- **Recovery State**: The failure state recorded when materialization stops after partial writes and rollback cannot be verified.
+- **Recovery State**: The failure state recorded when a controlled Install or Sync mutation fails, rollback cannot be verified, and the acquired **Operation Root** identity remains available.
   Avoid: Silent partial failure, implicit dirty state
 
 ## Command and reporting

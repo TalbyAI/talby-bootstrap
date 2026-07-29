@@ -621,6 +621,74 @@ func TestSyncJSONIncludesAllTypedConflictsOnStderr(t *testing.T) {
 	})
 }
 
+func TestRecoveryConflictHumanAndJSONOutputIsStableAndSanitized(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	if err := os.WriteFile(filepath.Join(root, "blocked"), []byte("prior contents secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := repositorystate.RecoveryState{
+		Code:    repositorystate.RecoveryCodeRollbackIncomplete,
+		Summary: "raw error secret",
+		Observations: []repositorystate.RecoveryObservation{
+			{Path: "blocked", Result: repositorystate.RecoveryResultRestoreFailed, ExpectedState: repositorystate.RecoveryExpectedAbsent},
+			{Path: "missing", Result: repositorystate.RecoveryResultVerificationFailed, ExpectedState: repositorystate.RecoveryExpectedFile, Digest: "sha256:" + strings.Repeat("a", 64), Mode: 0o640, Owner: &repositorystate.RecoveryOwner{Source: repositorystate.SourceIdentity{Type: "file", Locator: "./source"}, ResolvedVersion: "sha256:" + strings.Repeat("b", 64), Artifact: "tool"}},
+		},
+	}
+	if err := repositorystate.NewStore().WriteRecoveryState(context.Background(), root, state); err != nil {
+		t.Fatal(err)
+	}
+
+	withDir(t, root, func() {
+		var human bytes.Buffer
+		if code := execute(context.Background(), []string{"install"}, &bytes.Buffer{}, &human); code != int(app.ExitUserActionConflict) {
+			t.Fatalf("human exit code = %d", code)
+		}
+		for _, want := range []string{"rollback_incomplete blocked", "rollback_incomplete missing"} {
+			if !strings.Contains(human.String(), want) {
+				t.Fatalf("human stderr = %q, want %q", human.String(), want)
+			}
+		}
+		for _, unsafe := range []string{root, "prior contents secret", "raw error secret"} {
+			if strings.Contains(human.String(), unsafe) {
+				t.Fatalf("human stderr leaks %q: %q", unsafe, human.String())
+			}
+		}
+
+		var stdout, stderr bytes.Buffer
+		if code := execute(context.Background(), []string{"--output", "json", "install"}, &stdout, &stderr); code != int(app.ExitUserActionConflict) {
+			t.Fatalf("JSON exit code = %d", code)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("stdout = %q", stdout.String())
+		}
+		var envelope app.Result
+		if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		observations, ok := envelope.Details["observations"].([]any)
+		if envelope.Code != app.ExitUserActionConflict || envelope.Details["recovery_code"] != "rollback_incomplete" || !ok || len(observations) != 2 {
+			t.Fatalf("envelope = %#v", envelope)
+		}
+		first, ok := observations[0].(map[string]any)
+		firstExpected, expectedOK := first["expected"].(map[string]any)
+		if !ok || !expectedOK || first["path"] != "blocked" || firstExpected["state"] != "absent" {
+			t.Fatalf("first observation = %#v", observations[0])
+		}
+		second, ok := observations[1].(map[string]any)
+		secondExpected, expectedOK := second["expected"].(map[string]any)
+		owner, ownerOK := second["owner"].(map[string]any)
+		if !ok || !expectedOK || !ownerOK || second["path"] != "missing" || secondExpected["state"] != "file" || secondExpected["digest"] != state.Observations[1].Digest || owner["artifact"] != "tool" {
+			t.Fatalf("second observation = %#v", observations[1])
+		}
+		for _, unsafe := range []string{root, "prior contents secret", "raw error secret"} {
+			if strings.Contains(stderr.String(), unsafe) {
+				t.Fatalf("JSON stderr leaks %q: %q", unsafe, stderr.String())
+			}
+		}
+	})
+}
+
 func TestSyncExitCodesForValidationConflictAndTrust(t *testing.T) {
 	if code := execute(context.Background(), []string{"install", "invalid"}, &bytes.Buffer{}, &bytes.Buffer{}); code != int(app.ExitOperationalOrValidationError) {
 		t.Fatalf("validation exit code = %d, want 1", code)
