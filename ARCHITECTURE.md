@@ -28,6 +28,8 @@ Mutating operations resolve one canonical Operation Root, acquire an exclusive r
 
 Each non-Dry Run Install or Sync operation records prior bytes, permission bits, absence, and parent topology in an in-memory mutation journal immediately before every materialization, Manifest, Lockfile, or Materialization Record mutation. Controlled failures roll journal entries back in reverse order, attempt every restoration, remove operation-created directories, and re-observe each target. Verified final state determines rollback success even when a restoration action reported an error.
 
+If the acquired Operation Root is moved and replaced, loss of its identity stops rollback and Recovery State persistence without touching the replacement. This is an operational safe stop, not successful rollback.
+
 When rollback remains unverified, the operation writes sanitized Recovery State. The write is accepted only after rooted observation confirms a regular file with mode `0600`, strict reload reproduces the intended value, and topology revalidation detects no change. Later Install and Sync operations inspect Recovery State before normal state loading or Source resolution; mismatches block as user-action conflicts, matching non-Dry Run operations clear and verify its absence, and Dry Run never clears it.
 
 Dry Run follows the same read, resolve, and preflight path without acquiring the mutation lock or writing Manifest, Lockfile, Materialization Record, Recovery State, or target files. Planned changes are reported as `planned`; unchanged operations remain `no_op`.

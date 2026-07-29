@@ -22,6 +22,10 @@ Whole-file replacement uses a same-directory temporary file followed by atomic r
 
 Each non-Dry Run operation journals prior target state in memory immediately before every materialization, Manifest, Lockfile, or Materialization Record mutation. Controlled mutation failure rolls entries back in reverse order, attempts and re-observes every restoration, verifies prior bytes, permission bits, absence, and created-directory cleanup, and records sanitized Recovery State when final state remains unverified. Verified final state counts as restored even when the restoration action reported an error. Recovery State itself is accepted as recorded only after rooted observation confirms a regular file with mode `0600`, strict reload reproduces the intended values, and revalidation detects no change during verification.
 
+If an external process renames the acquired Operation Root and replaces its former path, loss of the acquired root identity stops rollback and Recovery State persistence. `tbboot` neither restores files, removes directories, nor writes Recovery State through the replacement path, and it does not search for or modify the moved original root. The operation returns a sanitized operational error with **Exit Code** `1`, while wrapped causes remain available for internal inspection. This is a safe stop, not successful rollback: Recovery State cannot satisfy its canonical repository-root contract after the root identity is lost.
+
+Recovery through the moved original root is deferred. It would require retaining an opened rooted handle across materialization, repository-state persistence, reverse rollback, created-directory cleanup, Recovery State placement, and final verification, with cross-platform handle semantics that preserve the invariant that an unrelated replacement directory remains untouched.
+
 Later Install and Sync operations inspect Recovery State before normal state loading or Source resolution. Mismatches and changes during the current inspect/revalidate window are user-action conflicts; Recovery State does not claim to detect safe parent-directory replacement between processes because it stores no directory identities. Matching non-Dry Run operations clear and verify its absence, while Dry Run never clears it. Clear failures remain sanitized operational errors. Human output reports only the fixed recovery code and canonical paths; JSON uses a private command DTO with nested `expected` data; neither output emits the persisted summary. Durable backups, process-crash recovery, and crash-recoverable lock takeover remain deferred.
 
 ## Consequences
@@ -30,3 +34,4 @@ Later Install and Sync operations inspect Recovery State before normal state loa
 - Managed changes can be traced to their artifact, source, source version, and owned paths.
 - Controlled in-process failures receive verified best-effort rollback without promising process-crash recovery.
 - Unverified restoration becomes explicit, sanitized Recovery State that blocks later work until repaired.
+- Losing the acquired Operation Root identity stops rollback and Recovery State persistence without touching a replacement directory.
