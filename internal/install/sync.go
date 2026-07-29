@@ -524,6 +524,15 @@ func (service Service) persistPrepared(ctx context.Context, root, operation stri
 	var tx *transaction
 	if !dryRun {
 		tx = &transaction{root: root, store: service.store, hook: service.mutationHook}
+		if len(expectedRoot) > 0 {
+			tx.rootInfo = expectedRoot[0].info
+		} else {
+			info, err := os.Stat(root)
+			if err != nil {
+				return Result{}, err
+			}
+			tx.rootInfo = info
+		}
 	}
 	record, changes, err := applyPrepared(tx, prepared, dryRun)
 	if err != nil {

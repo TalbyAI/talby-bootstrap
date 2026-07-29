@@ -6,7 +6,7 @@ This document is the entry point for the Talby Bootstrap 0.1 architecture. `CONT
 
 The 0.1 implementation publishes six strict schema-version-1 YAML documents with canonical `tbboot-` filenames. Consumer-facing and persisted Source References are scalar `file:<locator>` or `git:<locator>` values. The implemented acquisition path is local `file:` Sources: in-root Sources are allowed by default, while external absolute Sources require explicit Manifest approval of their Source Identity. Materialization uses whole-file `file` steps.
 
-Git identity storage is present for the contract, but Git acquisition is deferred. Catalogs, search, upgrade, executable or prompt-driven steps, fragment/template rendering, durable rollback lifecycle, and persisted operation logs are outside 0.1 and must not be represented as successful CLI behavior.
+Git identity storage is present for the contract, but Git acquisition is deferred. Catalogs, search, upgrade, executable or prompt-driven steps, fragment/template rendering, durable backups, process-crash recovery, crash-recoverable lock takeover, and persisted operation logs are outside 0.1 and must not be represented as successful CLI behavior.
 
 ## Architecture shape
 
@@ -26,7 +26,7 @@ The six persisted YAML documents use integer `schema_version: 1`, strict readers
 
 Mutating operations resolve one canonical Operation Root, acquire an exclusive root-scoped operation lock before reading state or resolving sources, and revalidate root, parent, source, and target identity before writes. Source and target paths must remain confined to their allowed roots and must reject symlinks, reparse points, special files, unsafe topology, and identity-changing races. File replacement uses a same-directory temporary file and atomic rename; existing modes are preserved and new files use `0644`.
 
-Each non-Dry Run Install or Sync operation records prior bytes, permission bits, absence, and parent topology in an in-memory mutation journal immediately before every materialization or repository-state mutation. Controlled failures roll journal entries back in reverse order, attempt every restoration, remove operation-created directories, and re-observe each target. Verified final state determines rollback success even when a restoration action reported an error.
+Each non-Dry Run Install or Sync operation records prior bytes, permission bits, absence, and parent topology in an in-memory mutation journal immediately before every materialization, Manifest, Lockfile, or Materialization Record mutation. Controlled failures roll journal entries back in reverse order, attempt every restoration, remove operation-created directories, and re-observe each target. Verified final state determines rollback success even when a restoration action reported an error.
 
 When rollback remains unverified, the operation writes sanitized Recovery State. The write is accepted only after rooted observation confirms a regular file with mode `0600`, strict reload reproduces the intended value, and topology revalidation detects no change. Later Install and Sync operations inspect Recovery State before normal state loading or Source resolution; mismatches block as user-action conflicts, matching non-Dry Run operations clear and verify its absence, and Dry Run never clears it.
 

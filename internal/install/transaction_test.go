@@ -273,3 +273,37 @@ func TestSyncAcceptsVerifiedRestorationDespiteReportedActionError(t *testing.T) 
 		t.Fatalf("Recovery State exists after verified rollback: %v", loadErr)
 	}
 }
+
+func TestInstallRootReplacementDoesNotReceiveRecoveryState(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(parent, "moved")
+	service, _ := testService(testResolved(testArtifact("a", "a")))
+	operationFailure := errors.New("operation failed")
+	service.mutationHook = func(kind mutationKind, path string, apply func() error) error {
+		if err := apply(); err != nil {
+			return err
+		}
+		if kind == mutationWrite && path == "a" {
+			if err := os.Rename(root, moved); err != nil {
+				return err
+			}
+			if err := os.Mkdir(root, 0o755); err != nil {
+				return err
+			}
+			return operationFailure
+		}
+		return nil
+	}
+
+	_, err := service.Install(context.Background(), Request{Root: root, Source: source.Ref{Type: "file", Locator: "./source"}, Artifact: "a"})
+	if !errors.Is(err, operationFailure) || !strings.Contains(err.Error(), "write recovery state") {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, repositorystate.RecoveryStateFileName)); !os.IsNotExist(statErr) {
+		t.Fatalf("replacement root Recovery State exists: %v", statErr)
+	}
+}

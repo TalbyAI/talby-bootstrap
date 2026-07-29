@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -34,10 +35,11 @@ type journalEntry struct {
 }
 
 type transaction struct {
-	root  string
-	store repositorystate.Store
-	hook  mutationHook
-	items []journalEntry
+	root     string
+	rootInfo os.FileInfo
+	store    repositorystate.Store
+	hook     mutationHook
+	entries  []journalEntry
 }
 
 func runMutation(hook mutationHook, kind mutationKind, path string, apply func() error) error {
@@ -69,7 +71,7 @@ func (tx *transaction) apply(kind mutationKind, path string, owner *repositoryst
 		copy := *owner
 		entry.owner = &copy
 	}
-	tx.items = append(tx.items, entry)
+	tx.entries = append(tx.entries, entry)
 	return tx.run(kind, path, apply)
 }
 
@@ -83,6 +85,12 @@ func (tx *transaction) fail(original error) (error, bool) {
 		Summary:      recoverySummary,
 		Observations: observations,
 	}
+	if tx.rootInfo == nil {
+		return errors.Join(original, fmt.Errorf("write recovery state: operation root identity is unavailable")), false
+	}
+	if err := validateRootIdentity(tx.root, tx.rootInfo); err != nil {
+		return errors.Join(original, fmt.Errorf("write recovery state: %w", err)), false
+	}
 	write := func() error {
 		return tx.store.WriteRecoveryState(context.Background(), tx.root, state)
 	}
@@ -90,6 +98,9 @@ func (tx *transaction) fail(original error) (error, bool) {
 		return errors.Join(original, fmt.Errorf("write recovery state: %w", err)), false
 	}
 	observed, err := materialize.Observe(tx.root, repositorystate.RecoveryStateFileName)
+	if err == nil && !materialize.SameRootIdentity(observed, tx.rootInfo) {
+		err = materialize.ChangedSincePreflightError{Path: "."}
+	}
 	if err == nil && (observed.Kind != materialize.EntryRegular || observed.Mode.Perm() != 0o600) {
 		err = fmt.Errorf("recovery state must be a regular file with mode 0600")
 	}
@@ -112,12 +123,15 @@ func (tx *transaction) fail(original error) (error, bool) {
 func (tx *transaction) rollback() []repositorystate.RecoveryObservation {
 	failed := map[string]repositorystate.RecoveryObservation{}
 	missingParents := map[string]struct{}{}
-	for i := len(tx.items) - 1; i >= 0; i-- {
-		entry := tx.items[i]
+	for i := len(tx.entries) - 1; i >= 0; i-- {
+		entry := tx.entries[i]
 		for _, path := range entry.missingParents {
 			missingParents[path] = struct{}{}
 		}
 		current, observeErr := materialize.Observe(tx.root, entry.prior.Path)
+		if observeErr == nil && (tx.rootInfo == nil || !materialize.SameRootIdentity(current, tx.rootInfo)) {
+			observeErr = materialize.ChangedSincePreflightError{Path: "."}
+		}
 		var restoreErr error
 		if observeErr == nil {
 			if entry.prior.Kind == materialize.EntryAbsent {
@@ -154,6 +168,9 @@ func (tx *transaction) rollback() []repositorystate.RecoveryObservation {
 	})
 	for _, path := range parents {
 		current, observeErr := materialize.Observe(tx.root, path)
+		if observeErr == nil && (tx.rootInfo == nil || !materialize.SameRootIdentity(current, tx.rootInfo)) {
+			observeErr = materialize.ChangedSincePreflightError{Path: "."}
+		}
 		var removeErr error
 		if observeErr == nil && current.Kind != materialize.EntryAbsent {
 			removeErr = materialize.Remove(current)

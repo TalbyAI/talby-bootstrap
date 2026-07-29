@@ -205,7 +205,7 @@ func (service Service) Install(ctx context.Context, request Request) (result Res
 		if err := operation.validate(); err != nil {
 			return Result{}, err
 		}
-		tx := &transaction{root: request.Root, store: service.store, hook: service.mutationHook}
+		tx := &transaction{root: request.Root, rootInfo: operation.info, store: service.store, hook: service.mutationHook}
 		if err := tx.apply(mutationWrite, repositorystate.ManifestFileName, nil, func() error {
 			return service.store.WriteManifest(ctx, request.Root, next)
 		}); err != nil {
