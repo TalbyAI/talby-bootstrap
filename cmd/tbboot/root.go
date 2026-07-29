@@ -25,6 +25,25 @@ type options struct {
 	output string
 }
 
+type recoveryObservationDetail struct {
+	Path     string                 `json:"path"`
+	Result   string                 `json:"result"`
+	Expected recoveryExpectedDetail `json:"expected"`
+	Owner    *recoveryOwnerDetail   `json:"owner,omitempty"`
+}
+
+type recoveryExpectedDetail struct {
+	State  string `json:"state"`
+	Digest string `json:"digest,omitempty"`
+	Mode   uint32 `json:"mode,omitempty"`
+}
+
+type recoveryOwnerDetail struct {
+	Source        repositorystate.SourceIdentity `json:"source"`
+	SourceVersion string                         `json:"source_version"`
+	Artifact      string                         `json:"artifact"`
+}
+
 func Execute() int {
 	return execute(context.Background(), os.Args[1:], os.Stdout, os.Stderr)
 }
@@ -38,6 +57,10 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 	if err := root.Execute(); err != nil {
 		code := app.ExitOperationalOrValidationError
 
+		var recovery installsvc.RecoveryConflictError
+		if errors.As(err, &recovery) {
+			code = app.ExitUserActionConflict
+		}
 		var userAction installsvc.UserActionError
 		if errors.As(err, &userAction) {
 			code = app.ExitUserActionConflict
@@ -49,6 +72,16 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 
 		if opts.output == outputJSON {
 			result := app.Result{Code: code, Message: err.Error()}
+			if errors.As(err, &recovery) {
+				result = app.Result{
+					Code:    app.ExitUserActionConflict,
+					Message: recovery.Error(),
+					Details: map[string]any{
+						"recovery_code": repositorystate.RecoveryCodeRollbackIncomplete,
+						"observations":  recoveryDetails(recovery.Observations),
+					},
+				}
+			}
 			if errors.As(err, &userAction) {
 				result = resultEnvelope(err.Error(), userAction.Result)
 				result.Code = code
@@ -57,6 +90,12 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 				result.Details = map[string]any{"denied_sources": sortedDeniedSources(trust.Denied)}
 			}
 			_ = json.NewEncoder(stderr).Encode(result)
+			return int(code)
+		}
+		if errors.As(err, &recovery) {
+			for _, observation := range recovery.Observations {
+				_, _ = fmt.Fprintf(stderr, "%s %s\n", repositorystate.RecoveryCodeRollbackIncomplete, observation.Path)
+			}
 			return int(code)
 		}
 		if errors.As(err, &userAction) {
@@ -69,6 +108,30 @@ func execute(ctx context.Context, args []string, stdout io.Writer, stderr io.Wri
 		return int(code)
 	}
 	return int(app.ExitSuccess)
+}
+
+func recoveryDetails(observations []repositorystate.RecoveryObservation) []recoveryObservationDetail {
+	details := make([]recoveryObservationDetail, 0, len(observations))
+	for _, observation := range observations {
+		detail := recoveryObservationDetail{
+			Path:   observation.Path,
+			Result: observation.Result,
+			Expected: recoveryExpectedDetail{
+				State:  observation.ExpectedState,
+				Digest: observation.Digest,
+				Mode:   observation.Mode,
+			},
+		}
+		if observation.Owner != nil {
+			detail.Owner = &recoveryOwnerDetail{
+				Source:        observation.Owner.Source,
+				SourceVersion: observation.Owner.ResolvedVersion,
+				Artifact:      observation.Owner.Artifact,
+			}
+		}
+		details = append(details, detail)
+	}
+	return details
 }
 
 func sortedDeniedSources(values []repositorystate.SourceIdentity) []repositorystate.SourceIdentity {
