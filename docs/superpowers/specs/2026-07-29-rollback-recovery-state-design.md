@@ -16,9 +16,9 @@ A non-Dry Run operation acquires the existing root operation lock before inspect
 - Materialization Record writes; and
 - directories created while writing those files.
 
-Immediately before each mutation, the journal captures the target's prior bytes, permission bits, absence, and existing parent topology. Backups remain in memory and are never written to Recovery State.
+Immediately before each mutation, the journal records an entry containing the target's prior bytes, permission bits, absence, and existing parent topology. The current entry therefore participates in rollback even when its mutation returns an error after making a partial change. Backups remain in memory and are never written to Recovery State.
 
-The operation applies mutations in its existing deterministic order. Every completed mutation adds one journal entry. A failed mutation is included when it may have changed filesystem state.
+The operation applies mutations in its existing deterministic order. It does not infer after failure whether a mutation changed filesystem state.
 
 ## Rollback
 
@@ -61,7 +61,7 @@ Dry Run performs the same inspection. It never removes Recovery State. It contin
 
 ## Reporting
 
-The install service exposes a typed recovery conflict carrying code `rollback_incomplete` and sanitized observations. Human output identifies the blocking code and affected canonical paths. JSON output includes the same stable code and structured observations in the shared error envelope. Both use the existing user-action-conflict exit class.
+The install service exposes a typed recovery conflict carrying sanitized observations. Human output identifies `rollback_incomplete` and the affected canonical paths. JSON output retains the shared numeric `code` for the user-action-conflict exit class and adds `recovery_code: "rollback_incomplete"` plus structured observations under `details`. Neither output includes prior contents, raw errors, or absolute paths.
 
 The initial operation failure remains an operational error even when it creates Recovery State. A subsequent operation blocked by that state is a user-action conflict.
 
